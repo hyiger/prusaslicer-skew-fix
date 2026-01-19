@@ -1,76 +1,44 @@
-# PrusaSlicer XY Skew Fix (Post-Processing Hook)
+# prusaslicer-skew-fix
 
-This repo contains a small **PrusaSlicer post-processing script** that applies **XY skew (shear) correction** directly to the generated G-code.
+**XY skew correction for PrusaSlicer when firmware M852 is unavailable.**
 
-This is useful on printers/firmware that **do not support Marlin skew correction** (e.g. no `M852`), but you have a measured XY skew value (for example from **Califlower V2**).
+This repository provides a PrusaSlicer post-processing script that applies
+XY skew (shear) compensation directly to generated **text** G-code.
 
-## What it does
+Designed for Prusa printers using Buddy firmware (e.g. Prusa Core One),
+where firmware-level skew correction (`M852`) is not supported.
 
-For each `G0`/`G1` move that includes X and/or Y, it applies:
+## Skew Model
 
-- `x' = x + y * tan(θ)`
-- `y' = y`
+    x' = x + y * tan(theta)
+    y' = y
 
-where `θ` is your measured XY skew angle (degrees).
+`theta` is the measured XY skew angle in degrees (commonly from **Califlower V2**).
 
-The script:
-- Tracks `G90/G91` (absolute/relative positioning) for XY moves
-- Only modifies `G0/G1` X/Y coordinates
-- Leaves Z/E/F and everything else untouched
-- Rewrites the output file **in-place** using a temp file + atomic replace
+## PrusaSlicer Setup
 
-## Quick start
+In **Print Settings → Output options → Post-processing scripts**, add:
 
-1. Put `skew_fix_ps.py` somewhere stable on your machine.
-2. Make sure Python 3 is installed.
-3. In **PrusaSlicer** go to:
+    python3 /path/to/skew_fix_ps.py --skew-deg -0.15
 
-**Print Settings → Output options → Post-processing scripts**
+(Do **not** add `[output_filepath]` — PrusaSlicer supplies the path automatically.)
 
-Add a line:
+## IMPORTANT: PrusaConnect and Binary G-code
 
-### macOS / Linux
+If you send jobs via **PrusaConnect**, PrusaSlicer may be configured to output **Binary G-code**
+(often called `.bgcode`, with magic header `GCDE`). This script **cannot** edit binary files.
 
-```bash
-python3 /full/path/to/skew_fix_ps.py --skew-deg -0.15 -- "[output_filepath]"
-```
+✅ Fix: **Disable “Binary G-code” output** in your printer/profile so PrusaSlicer produces a text `.gcode`.
+Then re-slice.
 
-### Windows
+This script includes a guard: if the file is binary, it aborts with a clear error instead of corrupting it.
 
-```bat
-python "C:\full\path\to\skew_fix_ps.py" --skew-deg -0.15 -- "[output_filepath]"
-```
+## Verification
 
-> Keep the quotes around `"[output_filepath]"` so it works with spaces in paths.
+Look for this header in the output G-code:
 
-## Verifying it ran
-
-After slicing, open the G-code and look near the top for a line like:
-
-```
-; postprocess: skew_fix_ps.py --skew-deg -0.15
-```
-
-If you see it, the hook ran and the file was rewritten.
-
-## Choosing the angle
-
-Use the **XY skew angle** reported by your measurement tool (e.g. Califlower V2). For your earlier example:
-
-- `-0.15°`
-
-Set `--skew-deg -0.15`.
-
-### Sign convention note
-
-Different tools can define the sign differently. If a follow-up calibration print shows the skew got worse, flip the sign (use `+0.15`).
-
-## Safety / limitations
-
-- The script only changes `G0/G1` moves. It intentionally leaves arcs (`G2/G3`) untouched.
-- This corrects a **single shear component** (X as a function of Y). That matches many XY-skew compensation models.
-- Always keep your original G-code as a backup the first time you try this.
+    ; postprocess: prusaslicer-skew-fix --skew-deg -0.15
 
 ## License
 
-MIT (you can add a LICENSE file if you want).
+MIT
