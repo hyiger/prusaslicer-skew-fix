@@ -145,3 +145,20 @@ Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
 ## License
 
 MIT
+
+---
+
+## Analyze-only mode
+
+You can inspect skew effects **without modifying the G-code**:
+
+```
+--analyze-only
+```
+
+This reports:
+- Maximum theoretical X displacement from skew
+- Skewed model bounds
+- Recommended recenter translation (if enabled)
+
+Useful for sanity-checking skew values before applying them.
