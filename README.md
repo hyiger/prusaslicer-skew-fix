@@ -13,7 +13,7 @@ correction directly to generated **text** G-code.
   y' = y
   ```
 - Optionally linearizes arcs (`G2`/`G3`) into `G1` segments (required for correct skew)
-- Optionally recenters the toolpath to prevent clipping
+- Optionally recenters to prevent clipping **without being fooled by purge/wipe code**
 
 ## IMPORTANT: Binary G-code
 
@@ -34,18 +34,17 @@ You can control the smoothness with:
 - `--arc-segment-mm` (default 0.20 mm)
 - `--arc-max-deg` (default 5°)
 
-## Prevent clipping: recenter using **model-only bounds** (recommended)
+## Prevent clipping: recenter using **extruding in-bed bounds** (recommended)
 
-Skew correction can move geometry slightly in X.
+Skew correction can move geometry slightly in X. To prevent the part from clipping,
+enable `--recenter-to-bed`.
 
-When `--recenter-to-bed` is enabled, the script:
+**How bounds are computed (important):**
+- Only moves that **extrude** (E increases / E > 0) are considered “model” bounds
+- Only endpoints that are already **inside the bed** in the original G-code are included
+- Purge lines / nozzle wipers / parking moves outside the bed are ignored by design
 
-1. Computes skewed bounds using **ONLY in-bed geometry**
-   - Purge lines, wipe moves, and parking moves that are *already outside the bed* are ignored
-2. Translates the entire toolpath so the **model** remains inside the bed
-3. Aborts only if the model still cannot fit
-
-This avoids large, confusing shifts caused by purge/wipe moves.
+This means your custom purge/wipe macros won’t cause confusing shifts of the actual model.
 
 Example (Core One defaults, small margin):
 
@@ -53,11 +52,21 @@ Example (Core One defaults, small margin):
 python3 skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --recenter-to-bed --margin 0.2
 ```
 
-If your bed differs:
+### Recenter mode: `center` vs `clamp`
+
+- `--recenter-mode center` (default): place the model in the middle of the allowable range
+- `--recenter-mode clamp`: minimal movement from 0 shift (only move if needed)
+
+Example:
 
 ```
-python3 skew_fix_ps.py --skew-deg -0.15 --recenter-to-bed --bed-x-max 250 --bed-y-max 220
+python3 skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --recenter-to-bed --recenter-mode clamp
 ```
+
+### Tolerance (`--eps`)
+
+The bounds check uses a small tolerance (default `--eps 0.01`) to avoid failing due to tiny
+floating-point rounding differences.
 
 ## PrusaSlicer setup
 
@@ -72,8 +81,7 @@ python3 /path/to/skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --recenter-to-
 ## Notes
 
 - Absolute XY (`G90`) is required for recentering (default PrusaSlicer output)
-- Purge / wipe macros outside the bed are intentionally ignored for bounds
-- Header comments include computed in-bed bounds and applied translation
+- Header comment includes computed bounds and applied translation
 
 ## License
 

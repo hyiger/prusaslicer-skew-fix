@@ -4,21 +4,21 @@ prusaslicer-skew-fix
 
 PrusaSlicer post-processing hook that applies XY skew correction to generated **text** G-code.
 
-Features:
-- XY skew correction (shear): x' = x + y * tan(theta)
+Skew model (shear):
+    x' = x + y * tan(theta)
+    y' = y
+
+Key features:
 - Optional arc linearization (G2/G3 -> G1) for mathematically correct skew
 - Optional auto-recenter + bounds check to prevent clipping
-- **Option A implemented**: bounds/recenter IGNORE out-of-bed moves (purge/wipe/parking)
-
-Rationale for Option A:
-- Purge lines and nozzle wipers are intentionally outside the printable area.
-- They are machine-space moves, not model geometry.
-- Including them in bounds caused unnecessary shifts.
-- We now compute bounds/recenter using ONLY in-bed geometry.
+- Bounds/recenter are computed from **model-space extrusion moves** only:
+  - Only moves that EXTRUDE (E increases / E>0) are included
+  - Only endpoints that are already IN-BED in the original G-code are included
+  - Purge/wipe/parking moves outside the bed do not affect recentering
 
 Binary G-code guard:
 - If the input file is Prusa Binary G-code (.bgcode; magic 'GCDE') or appears binary,
-  the script aborts with a clear error to avoid corruption.
+  the script aborts to avoid corrupting it.
 """
 
 from __future__ import annotations
@@ -150,18 +150,28 @@ def linearize_arc_points(st: State, words: Dict[str, float], cw: bool,
 def _in_bed(x: float, y: float, xmin: float, xmax: float, ymin: float, ymax: float) -> bool:
     return (xmin <= x <= xmax) and (ymin <= y <= ymax)
 
+def _is_extruding_move(st: State, words: Dict[str, float]) -> bool:
+    if "E" not in words:
+        return False
+    e_word = words["E"]
+    if st.abs_e:
+        return e_word > st.e
+    return e_word > 0.0
+
+def _choose_translation(lo: float, hi: float, mode: str) -> float:
+    if mode == "center":
+        return 0.5 * (lo + hi)
+    if lo <= 0.0 <= hi:
+        return 0.0
+    return lo if abs(lo) < abs(hi) else hi
+
 def compute_translation_for_bounds(path: str, k: float, linearize: bool,
                                   arc_seg_mm: float, arc_max_deg: float,
                                   bed_x_min: float, bed_x_max: float,
                                   bed_y_min: float, bed_y_max: float,
-                                  margin: float) -> Tuple[float, float, Tuple[float,float,float,float]]:
-    """Compute translation to keep **in-bed geometry only** inside the bed after skew.
-
-    Option A:
-    - Ignore moves that are already outside the bed in the ORIGINAL G-code
-      (purge lines, wipe moves, parking).
-    - Bounds and recenter are computed from model-space moves only.
-    """
+                                  margin: float,
+                                  recenter_mode: str,
+                                  eps: float) -> Tuple[float, float, Tuple[float,float,float,float]]:
     st = State()
     minx = float("inf"); maxx = float("-inf")
     miny = float("inf"); maxy = float("-inf")
@@ -193,45 +203,54 @@ def compute_translation_for_bounds(path: str, k: float, linearize: bool,
             if up.startswith("M83"):
                 st.abs_e = False; continue
 
-            # Bounds require absolute XY to be meaningful
             if not st.abs_xy:
-                raise SystemExit(
-                    "prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90)."
-                )
+                raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 
             if ARC_RE.match(s):
                 words = parse_words(code)
-                if linearize:
-                    cw = (s.split()[0].upper() == "G2")
-                    pts = linearize_arc_points(st, words, cw=cw,
-                                               seg_mm=arc_seg_mm, max_deg=arc_max_deg)
-                    for (xi, yi) in pts:
-                        # Option A: only include ORIGINAL in-bed geometry
-                        if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                            xs, ys = apply_skew_abs(xi, yi, k)
+                extruding = _is_extruding_move(st, words)
+
+                if extruding:
+                    if linearize:
+                        cw = (s.split()[0].upper() == "G2")
+                        pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                        for (xi, yi) in pts:
+                            if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
+                                xs, ys = apply_skew_abs(xi, yi, k)
+                                upd(xs, ys)
+                    else:
+                        x1, y1 = _arc_end_abs(st, words)
+                        if _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
+                            xs, ys = apply_skew_abs(x1, y1, k)
                             upd(xs, ys)
-                    st.x, st.y = pts[-1]
-                else:
-                    x1, y1 = _arc_end_abs(st, words)
-                    if _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                        xs, ys = apply_skew_abs(x1, y1, k)
-                        upd(xs, ys)
-                    st.x, st.y = x1, y1
+
+                x1, y1 = _arc_end_abs(st, words)
+                st.x, st.y = x1, y1
+                if "E" in words:
+                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
                 continue
 
             if MOVE_RE.match(s):
                 words = parse_words(code)
+                extruding = _is_extruding_move(st, words)
                 x1 = words.get("X", st.x)
                 y1 = words.get("Y", st.y)
-                # Option A: include only ORIGINAL in-bed geometry
-                if _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
+
+                if extruding and _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
                     xs, ys = apply_skew_abs(x1, y1, k)
                     upd(xs, ys)
+
                 st.x, st.y = x1, y1
+                if "E" in words:
+                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
                 continue
 
+            if "E" in up:
+                words = parse_words(code)
+                if "E" in words:
+                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
+
     if minx == float("inf"):
-        # No in-bed geometry detected
         return 0.0, 0.0, (0.0, 0.0, 0.0, 0.0)
 
     dx_lo = (bed_x_min + margin) - minx
@@ -239,22 +258,23 @@ def compute_translation_for_bounds(path: str, k: float, linearize: bool,
     dy_lo = (bed_y_min + margin) - miny
     dy_hi = (bed_y_max - margin) - maxy
 
-    if dx_lo > dx_hi or dy_lo > dy_hi:
+    if (dx_lo - dx_hi) > eps or (dy_lo - dy_hi) > eps:
         raise SystemExit(
             "prusaslicer-skew-fix: ERROR: Model geometry cannot fit within bed after skew.\n"
-            f"Skewed in-bed bounds: X[{minx:.3f}, {maxx:.3f}] Y[{miny:.3f}, {maxy:.3f}]\n"
+            f"Skewed in-bed extruding bounds: X[{minx:.3f}, {maxx:.3f}] Y[{miny:.3f}, {maxy:.3f}]\n"
             f"Bed bounds: X[{bed_x_min:.3f}, {bed_x_max:.3f}] "
             f"Y[{bed_y_min:.3f}, {bed_y_max:.3f}] (margin {margin:.3f})"
         )
 
-    dx = 0.5 * (dx_lo + dx_hi)
-    dy = 0.5 * (dy_lo + dy_hi)
+    dx = _choose_translation(dx_lo, dx_hi, recenter_mode)
+    dy = _choose_translation(dy_lo, dy_hi, recenter_mode)
     return dx, dy, (minx, maxx, miny, maxy)
 
 def rewrite(path: str, skew_deg: float,
             linearize: bool, arc_seg_mm: float, arc_max_deg: float,
             recenter: bool, bed_x_min: float, bed_x_max: float,
-            bed_y_min: float, bed_y_max: float, margin: float) -> None:
+            bed_y_min: float, bed_y_max: float, margin: float,
+            recenter_mode: str, eps: float) -> None:
     _assert_text_gcode(path)
     k = math.tan(math.radians(skew_deg))
     st = State()
@@ -264,7 +284,8 @@ def rewrite(path: str, skew_deg: float,
     if recenter:
         dx, dy, skew_bounds = compute_translation_for_bounds(
             path, k, linearize, arc_seg_mm, arc_max_deg,
-            bed_x_min, bed_x_max, bed_y_min, bed_y_max, margin
+            bed_x_min, bed_x_max, bed_y_min, bed_y_max, margin,
+            recenter_mode, eps
         )
 
     d = os.path.dirname(os.path.abspath(path)) or "."
@@ -277,9 +298,9 @@ def rewrite(path: str, skew_deg: float,
             if linearize:
                 hdr += f" --linearize-arcs --arc-segment-mm {arc_seg_mm} --arc-max-deg {arc_max_deg}"
             if recenter:
-                hdr += f" --recenter-to-bed --bed-x-min {bed_x_min} --bed-x-max {bed_x_max} --bed-y-min {bed_y_min} --bed-y-max {bed_y_max} --margin {margin}"
+                hdr += f" --recenter-to-bed --recenter-mode {recenter_mode} --bed-x-min {bed_x_min} --bed-x-max {bed_x_max} --bed-y-min {bed_y_min} --bed-y-max {bed_y_max} --margin {margin} --eps {eps}"
                 minx, maxx, miny, maxy = skew_bounds
-                hdr += f" ; in-bed skewed bounds: X[{minx:.3f},{maxx:.3f}] Y[{miny:.3f},{maxy:.3f}] shift: dx={dx:.3f} dy={dy:.3f}"
+                hdr += f" ; in-bed extruding skewed bounds: X[{minx:.3f},{maxx:.3f}] Y[{miny:.3f},{maxy:.3f}] shift: dx={dx:.3f} dy={dy:.3f}"
             out.write(hdr + "\n")
 
             for raw in inp:
@@ -289,28 +310,20 @@ def rewrite(path: str, skew_deg: float,
                 up = s.upper()
 
                 if up.startswith("G90.1"):
-                    st.ij_relative = False
-                    out.write(line + "\n"); continue
+                    st.ij_relative = False; out.write(line + "\n"); continue
                 if up.startswith("G91.1"):
-                    st.ij_relative = True
-                    out.write(line + "\n"); continue
+                    st.ij_relative = True; out.write(line + "\n"); continue
                 if up.startswith("G90"):
-                    st.abs_xy = True
-                    out.write(line + "\n"); continue
+                    st.abs_xy = True; out.write(line + "\n"); continue
                 if up.startswith("G91"):
-                    st.abs_xy = False
-                    out.write(line + "\n"); continue
+                    st.abs_xy = False; out.write(line + "\n"); continue
                 if up.startswith("M82"):
-                    st.abs_e = True
-                    out.write(line + "\n"); continue
+                    st.abs_e = True; out.write(line + "\n"); continue
                 if up.startswith("M83"):
-                    st.abs_e = False
-                    out.write(line + "\n"); continue
+                    st.abs_e = False; out.write(line + "\n"); continue
 
                 if recenter and not st.abs_xy:
-                    raise SystemExit(
-                        "prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90)."
-                    )
+                    raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 
                 if ARC_RE.match(s):
                     words = parse_words(code)
@@ -318,8 +331,7 @@ def rewrite(path: str, skew_deg: float,
                     cw = (cmd == "G2")
 
                     if linearize:
-                        pts = linearize_arc_points(st, words, cw=cw,
-                                                   seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                        pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
 
                         has_e = "E" in words
                         e0 = st.e
@@ -372,9 +384,7 @@ def rewrite(path: str, skew_deg: float,
                     has_y = "Y" in words
                     if has_x or has_y:
                         if not st.abs_xy:
-                            raise SystemExit(
-                                "prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output."
-                            )
+                            raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output.")
                         x_t = words.get("X", st.x)
                         y_t = words.get("Y", st.y)
                         xs, ys = apply_skew_abs(x_t, y_t, k)
@@ -416,19 +426,23 @@ def main(argv: List[str]) -> None:
                     help="Max angle per segment for arc linearization (degrees).")
 
     ap.add_argument("--recenter-to-bed", action="store_true",
-                    help="Compute skewed bounds using ONLY in-bed geometry, then translate the toolpath to keep the model inside the bed.")
+                    help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
+    ap.add_argument("--recenter-mode", choices=["center", "clamp"], default="center",
+                    help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.")
     ap.add_argument("--bed-x-min", type=float, default=0.0)
     ap.add_argument("--bed-x-max", type=float, default=250.0)
     ap.add_argument("--bed-y-min", type=float, default=0.0)
     ap.add_argument("--bed-y-max", type=float, default=220.0)
     ap.add_argument("--margin", type=float, default=0.0, help="Safety margin (mm) from bed edges.")
+    ap.add_argument("--eps", type=float, default=0.01, help="Bounds tolerance (mm) to avoid tiny floating-point failures.")
 
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
 
     rewrite(a.gcode, a.skew_deg,
             a.linearize_arcs, a.arc_segment_mm, a.arc_max_deg,
-            a.recenter_to_bed, a.bed_x_min, a.bed_x_max, a.bed_y_min, a.bed_y_max, a.margin)
+            a.recenter_to_bed, a.bed_x_min, a.bed_x_max, a.bed_y_min, a.bed_y_max, a.margin,
+            a.recenter_mode, a.eps)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
