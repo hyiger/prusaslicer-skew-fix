@@ -59,9 +59,10 @@ Let:
 
 For small skew angles, the skew can be approximated by:
 
-\[
-\theta \approx \arctan\left(\frac{d1 - d2}{2L}\right)
-\]
+**Approximate skew angle (small-angle assumption):**
+
+`theta ≈ arctan((d1 - d2) / (2 * L))`
+
 
 Notes:
 - This assumes small angles (true for most printers)
