@@ -82,6 +82,7 @@ def _assert_text_gcode(path: str) -> None:
             "Fix: Disable 'Binary G-code' output in PrusaSlicer, then re-slice."
         )
 
+# Apply XY shear: x' = x + y*tan(theta), y' = y (Marlin M852 compatible)
 def apply_skew_abs(x: float, y: float, k: float) -> Tuple[float, float]:
     return (x + y * k, y)
 
@@ -115,6 +116,7 @@ def _sweep(a0: float, a1: float, cw: bool) -> float:
             da += 2 * math.pi
     return da
 
+# Linearize a G2/G3 arc into G1 segments before applying skew
 def linearize_arc_points(st: State, words: Dict[str, float], cw: bool,
                          seg_mm: float, max_deg: float) -> List[Tuple[float, float]]:
     x0, y0 = st.x, st.y
@@ -165,6 +167,7 @@ def _choose_translation(lo: float, hi: float, mode: str) -> float:
         return 0.0
     return lo if abs(lo) < abs(hi) else hi
 
+# Compute translation so skewed *extruding in-bed* geometry stays within the bed
 def compute_translation_for_bounds(path: str, k: float, linearize: bool,
                                   arc_seg_mm: float, arc_max_deg: float,
                                   bed_x_min: float, bed_x_max: float,
@@ -270,6 +273,7 @@ def compute_translation_for_bounds(path: str, k: float, linearize: bool,
     dy = _choose_translation(dy_lo, dy_hi, recenter_mode)
     return dx, dy, (minx, maxx, miny, maxy)
 
+# Rewrite G-code in-place: linearize arcs, apply skew, optionally recenter
 def rewrite(path: str, skew_deg: float,
             linearize: bool, arc_seg_mm: float, arc_max_deg: float,
             recenter: bool, bed_x_min: float, bed_x_max: float,
@@ -414,6 +418,7 @@ def rewrite(path: str, skew_deg: float,
             try: os.unlink(tmp)
             except OSError: pass
 
+# CLI entry point used by PrusaSlicer post-processing
 def main(argv: List[str]) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skew-deg", type=float, required=True, help="XY skew angle in degrees (e.g. -0.15)")
