@@ -6,6 +6,12 @@ modifies **text G-code** after slicing.
 
 ---
 
+## Measuring skew
+
+See [MEASURING_SKEW.md](MEASURING_SKEW.md) for recommended ways to measure XY skew (including Califlower v2 and generic methods).
+
+---
+
 ## What problem this solves
 
 If your printer has measurable XY skew (axes not perfectly orthogonal),
