@@ -47,25 +47,30 @@ class State:
     e: float = 0.0
     f: Optional[float] = None
 
+# Split a G-code line into code and ';' comment parts.
 def split_comment(line: str) -> Tuple[str, str]:
     if ";" in line:
         code, comment = line.split(";", 1)
         return code.rstrip(), ";" + comment
     return line.rstrip(), ""
 
+# Parse axis words (X/Y/Z/E/F/I/J/K) from a G-code command.
 def parse_words(code: str) -> Dict[str, float]:
     return {m.group(1).upper(): float(m.group(2)) for m in AXIS_RE.finditer(code)}
 
+# Format float values compactly for G-code output (trim trailing zeros).
 def fmt(v: float) -> str:
     s = f"{v:.5f}".rstrip("0").rstrip(".")
     return s if s else "0"
 
+# Replace an axis value in a G-code line, or append it if missing.
 def replace_or_append(code: str, axis: str, val: float) -> str:
     axis = axis.upper()
     tok = f"{axis}{fmt(val)}"
     pat = re.compile(rf"(?i)\b{axis}\s*(-?\d+(?:\.\d*)?|-?\.\d+)\b")
     return pat.sub(tok, code, 1) if pat.search(code) else (code + " " + tok)
 
+# Abort if the input file is binary (.bgcode / NUL bytes) to avoid corruption.
 def _assert_text_gcode(path: str) -> None:
     with open(path, "rb") as f:
         head = f.read(512)
@@ -82,10 +87,11 @@ def _assert_text_gcode(path: str) -> None:
             "Fix: Disable 'Binary G-code' output in PrusaSlicer, then re-slice."
         )
 
-# Apply XY shear: x' = x + y*tan(theta), y' = y (Marlin M852 compatible)
+# Apply XY shear transform: x' = x + y*tan(theta), y' = y (Marlin M852-compatible).
 def apply_skew_abs(x: float, y: float, k: float) -> Tuple[float, float]:
     return (x + y * k, y)
 
+# Compute the absolute arc center from I/J (supports G90.1/G91.1).
 def _arc_center(st: State, words: Dict[str, float]) -> Tuple[float, float]:
     I = words.get("I", 0.0)
     J = words.get("J", 0.0)
@@ -93,6 +99,7 @@ def _arc_center(st: State, words: Dict[str, float]) -> Tuple[float, float]:
         return (st.x + I, st.y + J)
     return (I, J)
 
+# Compute the absolute end XY for an arc (respects G90/G91 state).
 def _arc_end_abs(st: State, words: Dict[str, float]) -> Tuple[float, float]:
     if st.abs_xy:
         x1 = words.get("X", st.x)
@@ -102,6 +109,7 @@ def _arc_end_abs(st: State, words: Dict[str, float]) -> Tuple[float, float]:
         y1 = st.y + words.get("Y", 0.0)
     return x1, y1
 
+# Compute signed sweep angle for CW/CCW arcs, normalized for interpolation.
 def _sweep(a0: float, a1: float, cw: bool) -> float:
     da = a1 - a0
     while da <= -math.pi:
@@ -116,7 +124,7 @@ def _sweep(a0: float, a1: float, cw: bool) -> float:
             da += 2 * math.pi
     return da
 
-# Linearize a G2/G3 arc into G1 segments before applying skew
+# Linearize a single G2/G3 arc into G1 points before skewing (circles → ellipses under shear).
 def linearize_arc_points(st: State, words: Dict[str, float], cw: bool,
                          seg_mm: float, max_deg: float) -> List[Tuple[float, float]]:
     x0, y0 = st.x, st.y
@@ -149,9 +157,11 @@ def linearize_arc_points(st: State, words: Dict[str, float], cw: bool,
         pts.append((xi, yi))
     return pts
 
+# Return True if an (x, y) point lies within the printable bed rectangle.
 def _in_bed(x: float, y: float, xmin: float, xmax: float, ymin: float, ymax: float) -> bool:
     return (xmin <= x <= xmax) and (ymin <= y <= ymax)
 
+# Return True if a move deposits plastic based on current extrusion mode/state.
 def _is_extruding_move(st: State, words: Dict[str, float]) -> bool:
     if "E" not in words:
         return False
@@ -160,6 +170,7 @@ def _is_extruding_move(st: State, words: Dict[str, float]) -> bool:
         return e_word > st.e
     return e_word > 0.0
 
+# Choose dx/dy using 'center' or minimal-shift 'clamp' strategy.
 def _choose_translation(lo: float, hi: float, mode: str) -> float:
     if mode == "center":
         return 0.5 * (lo + hi)
@@ -167,7 +178,7 @@ def _choose_translation(lo: float, hi: float, mode: str) -> float:
         return 0.0
     return lo if abs(lo) < abs(hi) else hi
 
-# Compute translation so skewed *extruding in-bed* geometry stays within the bed
+# Compute dx/dy so skewed extruding in-bed geometry stays within the bed.
 def compute_translation_for_bounds(path: str, k: float, linearize: bool,
                                   arc_seg_mm: float, arc_max_deg: float,
                                   bed_x_min: float, bed_x_max: float,
@@ -273,7 +284,7 @@ def compute_translation_for_bounds(path: str, k: float, linearize: bool,
     dy = _choose_translation(dy_lo, dy_hi, recenter_mode)
     return dx, dy, (minx, maxx, miny, maxy)
 
-# Rewrite G-code in-place: linearize arcs, apply skew, optionally recenter
+# Rewrite the G-code in-place: optional arc linearization, skew, and optional recentering.
 def rewrite(path: str, skew_deg: float,
             linearize: bool, arc_seg_mm: float, arc_max_deg: float,
             recenter: bool, bed_x_min: float, bed_x_max: float,
@@ -418,7 +429,7 @@ def rewrite(path: str, skew_deg: float,
             try: os.unlink(tmp)
             except OSError: pass
 
-# CLI entry point used by PrusaSlicer post-processing
+# CLI entry point used by PrusaSlicer post-processing.
 def main(argv: List[str]) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skew-deg", type=float, required=True, help="XY skew angle in degrees (e.g. -0.15)")
