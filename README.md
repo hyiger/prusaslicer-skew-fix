@@ -2,87 +2,78 @@
 
 **XY skew correction for PrusaSlicer when firmware `M852` is unavailable.**
 
-This repo provides a PrusaSlicer post-processing script that applies XY skew (shear) compensation
-directly to generated **text** G-code, with:
+This repository provides a PrusaSlicer post-processing script that applies XY skew (shear)
+correction directly to generated **text** G-code.
 
-- optional **arc linearization** (`G2/G3` → `G1` segments)
-- optional **auto-recenter + bounds check** to prevent clipping after skew correction
+## What it does
 
-Prusa/Buddy firmware does not support `M852` skew correction (see discussion: GitHub issue #385).
+- Applies XY skew correction using a shear:
+  ```
+  x' = x + y * tan(theta)
+  y' = y
+  ```
+- Optionally linearizes arcs (`G2`/`G3`) into `G1` segments (required for correct skew)
+- Optionally recenters the toolpath to prevent clipping
 
-## Skew model
+## IMPORTANT: Binary G-code
+
+This script **does not** support Prusa Binary G-code (`.bgcode`, magic `GCDE`).
+Disable Binary G-code output in PrusaSlicer so a text `.gcode` is generated.
+
+## Arcs / circles (G2/G3)
+
+A shear transform does **not** preserve circles (circles become ellipses).
+
+If your G-code contains `G2`/`G3`, enable arc linearization:
 
 ```
-x' = x + y * tan(theta)
-y' = y
+python3 skew_fix_ps.py --skew-deg -0.15 --linearize-arcs
 ```
 
-`theta` is the measured XY skew angle in degrees (e.g. from Califlower V2).
+You can control the smoothness with:
+- `--arc-segment-mm` (default 0.20 mm)
+- `--arc-max-deg` (default 5°)
+
+## Prevent clipping: recenter using **model-only bounds** (recommended)
+
+Skew correction can move geometry slightly in X.
+
+When `--recenter-to-bed` is enabled, the script:
+
+1. Computes skewed bounds using **ONLY in-bed geometry**
+   - Purge lines, wipe moves, and parking moves that are *already outside the bed* are ignored
+2. Translates the entire toolpath so the **model** remains inside the bed
+3. Aborts only if the model still cannot fit
+
+This avoids large, confusing shifts caused by purge/wipe moves.
+
+Example (Core One defaults, small margin):
+
+```
+python3 skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --recenter-to-bed --margin 0.2
+```
+
+If your bed differs:
+
+```
+python3 skew_fix_ps.py --skew-deg -0.15 --recenter-to-bed --bed-x-max 250 --bed-y-max 220
+```
 
 ## PrusaSlicer setup
 
-In **Print Settings → Output options → Post-processing scripts**, add:
+Add to **Print Settings → Output options → Post-processing scripts**:
 
 ```
-python3 /path/to/skew_fix_ps.py --skew-deg -0.15
+python3 /path/to/skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --recenter-to-bed
 ```
 
 (Do **not** add `[output_filepath]` — PrusaSlicer supplies the path automatically.)
 
-## IMPORTANT: PrusaConnect and Binary G-code
+## Notes
 
-If you send jobs via **PrusaConnect**, PrusaSlicer may be configured to output **Binary G-code**
-(often `.bgcode`, magic header `GCDE`). This script **cannot** edit binary files.
-
-✅ Fix: **Disable “Binary G-code” output** in your printer/profile so PrusaSlicer produces a text `.gcode`.
-Then re-slice.
-
-## Arcs / circles (G2/G3)
-
-A shear transform does **not** preserve circles (a circle becomes an ellipse), so `G2/G3` arcs must be
-**converted to line segments** for correct skew compensation.
-
-Enable arc linearization:
-
-```
-python3 /path/to/skew_fix_ps.py --skew-deg -0.15 --linearize-arcs --arc-segment-mm 0.20 --arc-max-deg 5
-```
-
-- `--arc-segment-mm`: max chord length (smaller = smoother, larger output file)
-- `--arc-max-deg`: max degrees per segment
-
-## Prevent clipping: auto-recenter + bounds checking (recommended)
-
-Skew correction can shift coordinates enough to push the toolpath outside the printable area.
-To prevent clipping, enable `--recenter-to-bed`. The script will:
-
-1) compute the skewed XY bounds,
-2) translate the entire toolpath to keep it inside the bed (optionally with a margin),
-3) abort if it still cannot fit.
-
-Example (Core One-like defaults 250×220 mm):
-
-```
-python3 /path/to/skew_fix_ps.py --skew-deg -0.15 --recenter-to-bed --margin 0.5
-```
-
-If your bed differs, override bounds:
-
-```
-python3 /path/to/skew_fix_ps.py --skew-deg -0.15 --recenter-to-bed --bed-x-max 250 --bed-y-max 220 --margin 0.5
-```
-
-Notes:
-- `--recenter-to-bed` currently requires **absolute XY** moves (`G90`). PrusaSlicer output is typically absolute.
-- The script writes a header comment showing the computed skewed bounds and applied translation.
-
-## Verification
-
-Look for this header in the output G-code:
-
-```
-; postprocess: prusaslicer-skew-fix --skew-deg ...
-```
+- Absolute XY (`G90`) is required for recentering (default PrusaSlicer output)
+- Purge / wipe macros outside the bed are intentionally ignored for bounds
+- Header comments include computed in-bed bounds and applied translation
 
 ## License
 
