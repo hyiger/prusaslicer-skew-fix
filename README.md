@@ -35,6 +35,43 @@ y' = y
 - `theta` is the measured XY skew angle (for example `-0.15°` from confirmatory tests like Califlower)
 - This matches the math used by Marlin’s `M852`
 
+- `y_ref` is the shear reference line (see below).
+
+### Shear reference (`y_ref`)
+
+The script applies skew relative to a horizontal reference line:
+
+```
+x' = x + (y - y_ref) * tan(theta)
+y' = y
+```
+
+**Default (`--shear-y-ref-mode auto`)**  
+`y_ref` is computed as the **center of extruding Y motion** (based on moves that actually print plastic). This makes the induced X displacement more symmetric and reduces the chance of pushing geometry toward a bed edge on large parts.
+
+**Legacy / Marlin-global-origin equivalent**  
+To reproduce older releases of this tool (and a global-origin shear), use:
+
+```bash
+--shear-y-ref-mode fixed --shear-y-ref 0
+```
+
+### Worked numeric example
+
+Given:
+- `theta = -0.15°`
+- `y_ref = 100 mm`
+- point `(x, y) = (50, 200)`
+
+Then:
+
+```
+x' = 50 + (200 - 100) * tan(-0.15°)
+   ≈ 49.738
+y' = 200
+```
+
+
 ---
 
 ## Key features
@@ -64,7 +101,7 @@ The script will abort if binary G-code is detected to prevent file corruption.
 
 A shear transform does **not** preserve circles — circles become ellipses.
 
-If your G-code contains `G2` or `G3`, you **must** enable arc linearization:
+If your G-code contains `G2` or `G3`, you **must** enable arc linearization (convert arcs into short `G1` segments):
 
 ```
 --linearize-arcs
@@ -81,6 +118,7 @@ This avoids preview artifacts and ensures printed geometry matches the math.
 ## Recenter logic (preventing clipping)
 
 After skew correction, geometry may shift slightly in X.
+With `--recenter-to-bed`, the script can **translate the toolpath in XY to fit the printable bed**.
 To ensure nothing goes out of bounds:
 
 ```
@@ -127,12 +165,32 @@ This prevents false “cannot fit” errors caused by floating-point rounding.
 
 ---
 
+## Output formatting (decimal places)
+
+By default the script emits:
+
+- X/Y with **3** decimals (`--xy-decimals 3`)
+- Other axes (E/F/Z/I/J/K/...) with **5** decimals (`--other-decimals 5`)
+
+This significantly reduces file size and keeps the output well within mechanical resolution.
+
+## Backward compatibility
+
+If you need output that is geometrically identical to older versions of this tool, use:
+
+```bash
+--shear-y-ref-mode fixed --shear-y-ref 0 --xy-decimals 5 --other-decimals 5
+```
+
+This reproduces the global-origin shear reference and higher-precision formatting used by earlier releases.
+
+
 ## Recommended PrusaSlicer setup
 
 **Print Settings → Output options → Post-processing scripts**
 
 ```
-python3 /path/to/skew_fix_ps.py   --skew-deg -0.15   --linearize-arcs   --recenter-to-bed   --recenter-mode clamp
+python3 /path/to/skew_fix_ps.py   --skew-deg -0.15   --shear-y-ref-mode auto   --linearize-arcs   --recenter-to-bed   --recenter-mode clamp
 ```
 
 Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
@@ -158,13 +216,25 @@ MIT
 
 You can inspect skew effects **without modifying the G-code**:
 
-```
---analyze-only
+```bash
+python3 skew_fix_ps.py --skew-deg -0.15 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp --analyze-only /path/to/file.gcode
 ```
 
-This reports:
-- Maximum theoretical X displacement from skew
-- Skewed model bounds
-- Recommended recenter translation (if enabled)
+The output includes:
 
-Useful for sanity-checking skew values before applying them.
+- Pre/post XY move bounds
+- Maximum |ΔX|
+- (If recenter is enabled) the computed in-bed extruding skewed bounds and translation
+
+
+**Note:** `--analyze-only` does not write an output file.
+
+Sample output (abridged):
+
+```text
+Input bounds (extruding XY):   X[...,...]  Y[...,...]
+Skewed bounds (before shift):  X[...,...]  Y[...,...]
+Max |ΔX|: ...
+Recenter shift applied:        ΔX=...  ΔY=...
+Final bounds (in bed):         X[...,...]  Y[...,...]
+```
