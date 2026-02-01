@@ -793,7 +793,7 @@ def main(argv: List[str]) -> None:
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
 
-    path = a.path
+    path = a.gcode
 
     rewrite(
         path,
