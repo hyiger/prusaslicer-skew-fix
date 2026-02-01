@@ -270,3 +270,20 @@ The following behaviors are explicitly out of scope:
 
 - Backwards compatibility with older versions of this tool  
   Tests and behavior lock in current design decisions.
+
+### Coordinate reference for skew measurements
+
+```
+A -------- B
+|          |
+|          |
+D -------- C
+```
+
+- AC: diagonal A→C
+- BD: diagonal B→D
+- AD: Y-direction side
+- AB: X-direction side
+
+--skew-from-square AC,BD,AD
+--skew-from-rectangle AC,BD,AD,AB
