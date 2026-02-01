@@ -36,6 +36,33 @@ MOVE_RE = re.compile(r"^(G0|G1)\b", re.IGNORECASE)
 ARC_RE  = re.compile(r"^(G2|G3)\b", re.IGNORECASE)
 AXIS_RE = re.compile(r"([XYZEFRIJK])\s*(-?\d+(?:\.\d*)?|-?\.\d+)", re.IGNORECASE)
 
+
+def _handle_modal_state_line(st: "State", up: str) -> bool:
+    """Update modal state from a stripped, uppercased G-code line.
+
+    Returns True if the line was a recognized modal command that only changes
+    state (and should generally be passed through unchanged), otherwise False.
+    """
+    if up.startswith("G90.1"):
+        st.ij_relative = False
+        return True
+    if up.startswith("G91.1"):
+        st.ij_relative = True
+        return True
+    if up.startswith("G90"):
+        st.abs_xy = True
+        return True
+    if up.startswith("G91"):
+        st.abs_xy = False
+        return True
+    if up.startswith("M82"):
+        st.abs_e = True
+        return True
+    if up.startswith("M83"):
+        st.abs_e = False
+        return True
+    return False
+
 @dataclass
 class State:
     abs_xy: bool = True          # G90/G91
@@ -223,18 +250,8 @@ def compute_inbed_extruding_bounds_original(path: str, linearize: bool,
                 continue
             up = s.upper()
 
-            if up.startswith("G90.1"):
-                st.ij_relative = False; continue
-            if up.startswith("G91.1"):
-                st.ij_relative = True; continue
-            if up.startswith("G90"):
-                st.abs_xy = True; continue
-            if up.startswith("G91"):
-                st.abs_xy = False; continue
-            if up.startswith("M82"):
-                st.abs_e = True; continue
-            if up.startswith("M83"):
-                st.abs_e = False; continue
+            if _handle_modal_state_line(st, up):
+                continue
 
             if ARC_RE.match(s):
                 words = parse_words(code)
@@ -307,18 +324,8 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float, linearize:
                 continue
             up = s.upper()
 
-            if up.startswith("G90.1"):
-                st.ij_relative = False; continue
-            if up.startswith("G91.1"):
-                st.ij_relative = True; continue
-            if up.startswith("G90"):
-                st.abs_xy = True; continue
-            if up.startswith("G91"):
-                st.abs_xy = False; continue
-            if up.startswith("M82"):
-                st.abs_e = True; continue
-            if up.startswith("M83"):
-                st.abs_e = False; continue
+            if _handle_modal_state_line(st, up):
+                continue
 
             if not st.abs_xy:
                 raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
@@ -430,18 +437,8 @@ def analyze_gcode(path: str, k: float, y_ref: float,
                 continue
             up = s.upper()
 
-            if up.startswith("G90.1"):
-                st.ij_relative = False; continue
-            if up.startswith("G91.1"):
-                st.ij_relative = True; continue
-            if up.startswith("G90"):
-                st.abs_xy = True; continue
-            if up.startswith("G91"):
-                st.abs_xy = False; continue
-            if up.startswith("M82"):
-                st.abs_e = True; continue
-            if up.startswith("M83"):
-                st.abs_e = False; continue
+            if _handle_modal_state_line(st, up):
+                continue
 
             if not st.abs_xy:
                 continue
@@ -578,18 +575,9 @@ def rewrite(path: str, skew_deg: float,
                 s = code.strip()
                 up = s.upper()
 
-                if up.startswith("G90.1"):
-                    st.ij_relative = False; out.write(line + "\n"); continue
-                if up.startswith("G91.1"):
-                    st.ij_relative = True; out.write(line + "\n"); continue
-                if up.startswith("G90"):
-                    st.abs_xy = True; out.write(line + "\n"); continue
-                if up.startswith("G91"):
-                    st.abs_xy = False; out.write(line + "\n"); continue
-                if up.startswith("M82"):
-                    st.abs_e = True; out.write(line + "\n"); continue
-                if up.startswith("M83"):
-                    st.abs_e = False; out.write(line + "\n"); continue
+                if _handle_modal_state_line(st, up):
+                    out.write(line + "\n")
+                    continue
 
                 if recenter and not st.abs_xy:
                     raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
@@ -649,24 +637,26 @@ def rewrite(path: str, skew_deg: float,
 
                 if MOVE_RE.match(s):
                     words = parse_words(code)
-                    has_x = "X" in words
-                    has_y = "Y" in words
-                    if has_x or has_y:
+                    has_xy = ("X" in words) or ("Y" in words)
+                    if has_xy:
                         if not st.abs_xy:
                             raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output.")
+                        # Even if only one axis is present in the original line, the transformed
+                        # endpoint generally depends on BOTH X and Y (x' depends on y), so emit both.
                         x_t = words.get("X", st.x)
                         y_t = words.get("Y", st.y)
                         xs, ys = apply_skew_abs(x_t, y_t, k, y_ref)
-                        xs += dx; ys += dy
+                        xs += dx
+                        ys += dy
                         new = code
-                        if has_x: new = replace_or_append(new, "X", xs, xy_places=xy_decimals, other_places=other_decimals)
-                        if has_y: new = replace_or_append(new, "Y", ys, xy_places=xy_decimals, other_places=other_decimals)
+                        new = replace_or_append(new, "X", xs, xy_places=xy_decimals, other_places=other_decimals)
+                        new = replace_or_append(new, "Y", ys, xy_places=xy_decimals, other_places=other_decimals)
                         out.write(new.rstrip() + ("" if not comment else " " + comment.lstrip()) + "\n")
+                        # Update position to the original (unskewed) endpoint.
+                        st.x, st.y = x_t, y_t
                     else:
                         out.write(line + "\n")
 
-                    if has_x: st.x = words["X"]
-                    if has_y: st.y = words["Y"]
                     if "E" in words:
                         st.e = words["E"] if st.abs_e else (st.e + words["E"])
                     if "F" in words:

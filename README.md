@@ -37,6 +37,12 @@ y' = y
 
 - `y_ref` is the shear reference line (see below).
 
+### Coordinate conventions
+
+- The correction is a **shear in X as a function of Y** (Y is unchanged).
+- The transform is applied to the **endpoint position** of each XY move.
+- For correctness, the rewriter may **add a missing X or Y word** on a `G0`/`G1` line (for example, a `G1 Y...` line still changes X under shear, because `x'` depends on `y`).
+
 ### Shear reference (`y_ref`)
 
 The script applies skew relative to a horizontal reference line:
@@ -203,6 +209,12 @@ Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
 - Text G-code only
 - Intended for small-angle skew correction
 - Z coordinates are not modified
+
+## When not to use this
+
+- If your firmware already supports and is using `M852` (or another skew/orthogonality correction) — don’t double-correct.
+- If you already corrected the model STL in CAD or with a mesh transform — don’t apply this again.
+- If your measured skew is within your measurement noise (for many setups, ~0.02° or less) — you may just be adding complexity.
 
 ---
 
