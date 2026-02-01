@@ -14,8 +14,6 @@ def _run(gcode: str) -> str:
         rewrite(
             str(p),
             skew_deg=0.15,
-            arc_seg_mm=0.20,
-            arc_max_deg=5.0,
             recenter=False,
             bed_x_min=0,
             bed_x_max=250,
@@ -23,11 +21,8 @@ def _run(gcode: str) -> str:
             bed_y_max=210,
             margin=0,
             recenter_mode="clamp",
-            eps=1e-9,
             shear_y_ref_mode="fixed",
             shear_y_ref=0.0,
-            xy_decimals=3,
-            other_decimals=3,
             analyze_only=False,
         )
         return p.read_text(encoding="utf-8")

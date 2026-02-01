@@ -18,8 +18,7 @@ def test_inbed_extruding_bounds_ignore_out_of_bed_and_nonextruding(tmp_path, loa
     ]), encoding="utf-8")
 
     minx, maxx, miny, maxy = m.compute_inbed_extruding_bounds_original(
-        str(g),arc_seg_mm=0.20,
-        arc_max_deg=5.0,
+        str(g),
         bed_x_min=0.0, bed_x_max=250.0,
         bed_y_min=0.0, bed_y_max=220.0,
     )

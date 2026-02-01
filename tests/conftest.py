@@ -1,15 +1,16 @@
-import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
+import importlib
 import pytest
 
-@pytest.fixture()
+# Ensure repository root is on sys.path for test imports
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+@pytest.fixture
 def load_module():
-    mod_path = Path(__file__).resolve().parents[1] / "skew_fix_ps.py"
-    spec = importlib.util.spec_from_file_location("skew_fix_ps", mod_path)
-    module = importlib.util.module_from_spec(spec)
-    # Ensure the module is present in sys.modules during execution (needed for dataclasses + string annotations)
-    sys.modules[spec.name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    """Load skew_fix_ps fresh for tests that expect this fixture."""
+    if 'skew_fix_ps' in sys.modules:
+        del sys.modules['skew_fix_ps']
+    return importlib.import_module('skew_fix_ps')

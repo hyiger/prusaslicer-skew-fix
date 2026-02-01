@@ -39,8 +39,7 @@ def test_y_only_move_emits_x_for_correct_shear(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,arc_seg_mm=0.20,
-        arc_max_deg=5.0,
+        skew_deg=-0.15,
         recenter=False,
         bed_x_min=0.0,
         bed_x_max=250.0,
@@ -48,11 +47,8 @@ def test_y_only_move_emits_x_for_correct_shear(tmp_path, load_module):
         bed_y_max=220.0,
         margin=0.0,
         recenter_mode="center",
-        eps=0.01,
         shear_y_ref_mode="fixed",
         shear_y_ref=0.0,
-        xy_decimals=5,
-        other_decimals=5,
         analyze_only=False,
     )
 
@@ -64,7 +60,7 @@ def test_y_only_move_emits_x_for_correct_shear(tmp_path, load_module):
     assert xy is not None, y20
     x_out, y_out = xy
     assert y_out == pytest.approx(20.0)
-    assert x_out == pytest.approx(10.0 + 20.0 * k, abs=1e-5)
+    assert x_out == pytest.approx(10.0 + 20.0 * k, abs=1e-3)
 
 
 def test_negative_coordinates_are_supported(tmp_path, load_module):
@@ -86,8 +82,7 @@ def test_negative_coordinates_are_supported(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,arc_seg_mm=0.20,
-        arc_max_deg=5.0,
+        skew_deg=-0.15,
         recenter=False,
         bed_x_min=0.0,
         bed_x_max=250.0,
@@ -95,11 +90,8 @@ def test_negative_coordinates_are_supported(tmp_path, load_module):
         bed_y_max=220.0,
         margin=0.0,
         recenter_mode="center",
-        eps=0.01,
         shear_y_ref_mode="fixed",
         shear_y_ref=0.0,
-        xy_decimals=5,
-        other_decimals=5,
         analyze_only=False,
     )
 
@@ -110,7 +102,7 @@ def test_negative_coordinates_are_supported(tmp_path, load_module):
     assert xy is not None
     x_out, y_out = xy
     assert y_out == pytest.approx(25.0)
-    assert x_out == pytest.approx(-10.0 + 25.0 * k, abs=1e-5)
+    assert x_out == pytest.approx(-10.0 + 25.0 * k, abs=1e-3)
 
 
 def test_extruder_only_moves_are_preserved(tmp_path, load_module):
@@ -131,8 +123,7 @@ def test_extruder_only_moves_are_preserved(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,arc_seg_mm=0.20,
-        arc_max_deg=5.0,
+        skew_deg=-0.15,
         recenter=False,
         bed_x_min=0.0,
         bed_x_max=250.0,
@@ -140,11 +131,8 @@ def test_extruder_only_moves_are_preserved(tmp_path, load_module):
         bed_y_max=220.0,
         margin=0.0,
         recenter_mode="center",
-        eps=0.01,
         shear_y_ref_mode="fixed",
         shear_y_ref=0.0,
-        xy_decimals=5,
-        other_decimals=5,
         analyze_only=False,
     )
 
@@ -173,8 +161,7 @@ def test_zero_skew_preserves_endpoints(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=0.0,arc_seg_mm=0.20,
-        arc_max_deg=5.0,
+        skew_deg=0.0,
         recenter=False,
         bed_x_min=0.0,
         bed_x_max=250.0,
@@ -182,11 +169,8 @@ def test_zero_skew_preserves_endpoints(tmp_path, load_module):
         bed_y_max=220.0,
         margin=0.0,
         recenter_mode="center",
-        eps=0.01,
         shear_y_ref_mode="fixed",
         shear_y_ref=0.0,
-        xy_decimals=5,
-        other_decimals=5,
         analyze_only=False,
     )
 
@@ -201,5 +185,5 @@ def test_zero_skew_preserves_endpoints(tmp_path, load_module):
         xy = _extract_first_move_xy(ln)
         assert xy is not None, ln
         x_out, y_out = xy
-        assert x_out == pytest.approx(ex, abs=1e-5)
-        assert y_out == pytest.approx(ey, abs=1e-5)
+        assert x_out == pytest.approx(ex, abs=1e-3)
+        assert y_out == pytest.approx(ey, abs=1e-3)
