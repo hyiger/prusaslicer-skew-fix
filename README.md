@@ -12,6 +12,35 @@ See [MEASURING_SKEW.md](MEASURING_SKEW.md) for recommended ways to measure XY sk
 
 ---
 
+
+## Deriving skew from a printed square or rectangle
+
+If you prefer to derive skew from simple caliper measurements (no angle math), you can use:
+
+```
+--skew-from-square AC,BD,AD
+--skew-from-rectangle AC,BD,AD,AB
+```
+
+Label your printed square/rectangle like this:
+
+```
+A -------- B
+|          |
+|          |
+D -------- C
+```
+
+- **AC**: diagonal A→C  
+- **BD**: diagonal B→D  
+- **AD**: Y-direction side length  
+- **AB**: X-direction side length (rectangles)
+
+The derived skew matches the same shear model as Marlin `M852`:
+
+	tan(theta) = (AC - BD) / (2 * AD)
+
+
 ## What problem this solves
 
 If your printer has measurable XY skew (axes not perfectly orthogonal),
@@ -55,12 +84,6 @@ y' = y
 **Default (`--shear-y-ref-mode auto`)**  
 `y_ref` is computed as the **center of extruding Y motion** (based on moves that actually print plastic). This makes the induced X displacement more symmetric and reduces the chance of pushing geometry toward a bed edge on large parts.
 
-**Legacy / Marlin-global-origin equivalent**  
-To reproduce older releases of this tool (and a global-origin shear), use:
-
-```bash
---shear-y-ref-mode fixed --shear-y-ref 0
-```
 
 ### Worked numeric example
 
