@@ -606,17 +606,20 @@ def rewrite(
         return xs + dx, ys + dy
 
     def _process_arc(line: str, code: str, comment: str, s: str) -> None:
-        """Process a single G2/G3 arc.
+        """Always-linearized arc handling (G2/G3 -> G1).
 
-        Arcs are ALWAYS linearized to G1 segments before skewing.
-        A shear transform turns circles into ellipses, which firmware arc commands cannot represent.
+        Guarantees:
+        - No G2/G3 is preserved in output.
+        - Feedrate (F) and trailing comment are preserved on the *first* emitted segment only.
+        - For relative extrusion (M83), the *printed* per-segment E values sum exactly to the original arc E
+          at the configured output precision.
         """
         words = parse_words(code)
         cmd = s.split()[0].upper()
         cw = (cmd == "G2")
 
-        # Fixed, correctness-first segmentation parameters.
         pts = linearize_arc_points(st, words, cw=cw, seg_mm=0.20, max_deg=5.0)
+        n = len(pts)
 
         has_e = "E" in words
         e0 = st.e
@@ -634,7 +637,13 @@ def rewrite(
         has_f = "F" in words
         f_word = words.get("F", None)
 
-        n = len(pts)
+        # For relative E (M83), distribute dE across segments in OUTPUT precision and close on the last segment
+        # so that the sum of *printed* increments equals dE.
+        e_accum_print = 0.0
+        per_print = 0.0
+        if has_e and (not st.abs_e) and n > 0:
+            per_print = round(dE / n, other_decimals)
+
         for i, (xi, yi) in enumerate(pts, start=1):
             xs, ys = _skew_and_translate_xy(xi, yi)
 
@@ -644,64 +653,73 @@ def rewrite(
 
             if has_e:
                 if st.abs_e:
+                    # Absolute E: emit interpolated absolute E, exact at the end.
                     t = i / n
                     ei = e0 + dE * t
                     if i == n:
                         ei = e_end
                     l += f" E{fmt_axis('E', ei, xy_decimals, other_decimals)}"
                 else:
-                    l += f" E{fmt_axis('E', (dE / n), xy_decimals, other_decimals)}"
+                    # Relative E: emit increments whose printed sum equals dE.
+                    if i < n:
+                        ei = per_print
+                        e_accum_print += ei
+                    else:
+                        ei = round(dE - e_accum_print, other_decimals)
+                    l += f" E{fmt_axis('E', ei, xy_decimals, other_decimals)}"
 
-            # Preserve feedrate on first segment only.
+            # Preserve feedrate on first emitted line only.
             if has_f and f_word is not None and i == 1:
                 l += f" F{fmt_axis('F', f_word, xy_decimals, other_decimals)}"
 
-            # Preserve comment on first emitted line only.
+            # Preserve the original comment on the first emitted line only.
             if comment and i == 1:
                 l += " " + comment.lstrip()
 
             out.write(l + "\n")
 
-        # Update state to original (unskewed) arc endpoint.
+        # Update state to original (unskewed) arc endpoint and E/F semantics.
         st.x, st.y = pts[-1]
         if has_e:
             st.e = e_end
         if has_f and f_word is not None:
             st.f = f_word
 
-    def _process_move(line: str, code: str, comment: str, s: str) -> None:
-        words = parse_words(code)
-        has_xy = ("X" in words) or ("Y" in words)
+    def _process_move(
 
-        if not has_xy:
-            out.write(line + "\n")
-        else:
-            if not st.abs_xy:
-                raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output.")
-            if recenter and not st.abs_xy:
-                raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
+        line: str, code: str, comment: str, s: str) -> None:
+                words = parse_words(code)
+                has_xy = ("X" in words) or ("Y" in words)
 
-            # Endpoint in original (unskewed) coordinate space.
-            x_t = words.get("X", st.x)
-            y_t = words.get("Y", st.y)
+                if not has_xy:
+                    out.write(line + "\n")
+                else:
+                    if not st.abs_xy:
+                        raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output.")
+                    if recenter and not st.abs_xy:
+                        raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 
-            xs, ys = _skew_and_translate_xy(x_t, y_t)
+                    # Endpoint in original (unskewed) coordinate space.
+                    x_t = words.get("X", st.x)
+                    y_t = words.get("Y", st.y)
 
-            # Replace or append ensures stable formatting and preserves other words ordering.
-            new = replace_or_append(code, "X", xs, xy_places=xy_decimals, other_places=other_decimals)
-            new = replace_or_append(new, "Y", ys, xy_places=xy_decimals, other_places=other_decimals)
-            out.write(new.rstrip() + ("" if not comment else " " + comment.lstrip()) + "\n")
+                    xs, ys = _skew_and_translate_xy(x_t, y_t)
 
-            # Update position state to the original (unskewed) endpoint.
-            st.x, st.y = x_t, y_t
+                    # Replace or append ensures stable formatting and preserves other words ordering.
+                    new = replace_or_append(code, "X", xs, xy_places=xy_decimals, other_places=other_decimals)
+                    new = replace_or_append(new, "Y", ys, xy_places=xy_decimals, other_places=other_decimals)
+                    out.write(new.rstrip() + ("" if not comment else " " + comment.lstrip()) + "\n")
 
-        # Always update other axes/state from the original line.
-        if "E" in words:
-            st.e = words["E"] if st.abs_e else (st.e + words["E"])
-        if "F" in words:
-            st.f = words["F"]
-        if "Z" in words:
-            st.z = words["Z"] if st.abs_xy else (st.z + words["Z"])
+                    # Update position state to the original (unskewed) endpoint.
+                    st.x, st.y = x_t, y_t
+
+                # Always update other axes/state from the original line.
+                if "E" in words:
+                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
+                if "F" in words:
+                    st.f = words["F"]
+                if "Z" in words:
+                    st.z = words["Z"] if st.abs_xy else (st.z + words["Z"])
 
     # ----- rewrite in-place safely -----
     d = os.path.dirname(os.path.abspath(path)) or "."
