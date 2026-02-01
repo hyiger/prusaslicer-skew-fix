@@ -263,20 +263,28 @@ def compute_inbed_extruding_bounds_original(path: str,bed_x_min: float, bed_x_ma
                 continue
 
             if ARC_RE.match(s):
-                # Always include linearized arc points (circles -> ellipses under shear, so arcs are always linearized elsewhere too).
                 words = parse_words(code)
                 cmd = s.split()[0].upper()
                 cw = (cmd == "G2")
-                pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
+
+                pts = linearize_arc_points(
+                    st, words, cw=cw,
+                    seg_mm=ARC_SEG_MM,
+                    max_deg=ARC_MAX_DEG,
+                )
+
                 for (xi, yi) in pts:
                     if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
                         minx = min(minx, xi); maxx = max(maxx, xi)
                         miny = min(miny, yi); maxy = max(maxy, yi)
+
                 st.x, st.y = pts[-1]
+
                 if "E" in words:
                     st.e = words["E"] if st.abs_e else (st.e + words["E"])
                 if "F" in words:
                     st.f = words["F"]
+
                 continue
 
             if MOVE_RE.match(s):
@@ -307,6 +315,8 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float,bed_x_min: 
                                   bed_y_min: float, bed_y_max: float,
                                   margin: float,
                                   recenter_mode: str) -> Tuple[float, float, Tuple[float,float,float,float]]:
+    eps = EPS
+    
     st = State()
     minx = float("inf"); maxx = float("-inf")
     miny = float("inf"); maxy = float("-inf")
@@ -332,21 +342,29 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float,bed_x_min: 
                 raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 
             if ARC_RE.match(s):
-                # Always include linearized arc points (circles -> ellipses under shear, so arcs are always linearized elsewhere too).
                 words = parse_words(code)
                 cmd = s.split()[0].upper()
                 cw = (cmd == "G2")
-                pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
+
+                pts = linearize_arc_points(
+                    st, words, cw=cw,
+                    seg_mm=ARC_SEG_MM,
+                    max_deg=ARC_MAX_DEG
+                )
+
                 for (xi, yi) in pts:
                     if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
                         minx = min(minx, xi); maxx = max(maxx, xi)
                         miny = min(miny, yi); maxy = max(maxy, yi)
+
                 st.x, st.y = pts[-1]
-            if "E" in words:
-                st.e = words["E"] if st.abs_e else (st.e + words["E"])
-            if "F" in words:
-                st.f = words["F"]
-            continue
+
+                if "E" in words:
+                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
+                if "F" in words:
+                    st.f = words["F"]
+
+                continue
 
             if MOVE_RE.match(s):
                 words = parse_words(code)
