@@ -32,6 +32,15 @@ import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+# ---- Correctness-locked constants ----
+ARC_SEG_MM = 0.20
+ARC_MAX_DEG = 5.0
+EPS = 1e-9
+XY_DECIMALS = 3
+OTHER_DECIMALS = 3
+
+
+
 MOVE_RE = re.compile(r"^(G0|G1)\b", re.IGNORECASE)
 ARC_RE  = re.compile(r"^(G2|G3)\b", re.IGNORECASE)
 AXIS_RE = re.compile(r"([XYZEFRIJK])\s*(-?\d+(?:\.\d*)?|-?\.\d+)", re.IGNORECASE)
@@ -228,11 +237,11 @@ def _choose_translation(lo: float, hi: float, mode: str) -> float:
 
 
 # Compute original (unskewed) in-bed extruding bounds (endpoints only for G0/G1, optional linearized arc points).
-def compute_inbed_extruding_bounds_original(path: str,
-                                           arc_seg_mm: float, arc_max_deg: float,
-                                           bed_x_min: float, bed_x_max: float,
+def compute_inbed_extruding_bounds_original(path: str,bed_x_min: float, bed_x_max: float,
                                            bed_y_min: float, bed_y_max: float) -> Tuple[float,float,float,float]:
     st = State()
+    eps = EPS
+
     minx = float("inf"); maxx = float("-inf")
     miny = float("inf"); maxy = float("-inf")
 
@@ -258,7 +267,7 @@ def compute_inbed_extruding_bounds_original(path: str,
                 words = parse_words(code)
                 cmd = s.split()[0].upper()
                 cw = (cmd == "G2")
-                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
                 for (xi, yi) in pts:
                     if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
                         minx = min(minx, xi); maxx = max(maxx, xi)
@@ -294,13 +303,10 @@ def compute_inbed_extruding_bounds_original(path: str,
     return (minx, maxx, miny, maxy)
 
 # Compute dx/dy so skewed extruding in-bed geometry stays within the bed.
-def compute_translation_for_bounds(path: str, k: float, y_ref: float, linearize: bool,
-                                  arc_seg_mm: float, arc_max_deg: float,
-                                  bed_x_min: float, bed_x_max: float,
+def compute_translation_for_bounds(path: str, k: float, y_ref: float,bed_x_min: float, bed_x_max: float,
                                   bed_y_min: float, bed_y_max: float,
                                   margin: float,
-                                  recenter_mode: str,
-                                  eps: float) -> Tuple[float, float, Tuple[float,float,float,float]]:
+                                  recenter_mode: str) -> Tuple[float, float, Tuple[float,float,float,float]]:
     st = State()
     minx = float("inf"); maxx = float("-inf")
     miny = float("inf"); maxy = float("-inf")
@@ -330,7 +336,7 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float, linearize:
                 words = parse_words(code)
                 cmd = s.split()[0].upper()
                 cw = (cmd == "G2")
-                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
                 for (xi, yi) in pts:
                     if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
                         minx = min(minx, xi); maxx = max(maxx, xi)
@@ -383,10 +389,8 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float, linearize:
     return dx, dy, (minx, maxx, miny, maxy)
 
 
-def analyze_gcode(path: str, k: float, y_ref: float,
-                 linearize: bool, arc_seg_mm: float, arc_max_deg: float,
-                 bed_x_min: float, bed_x_max: float, bed_y_min: float, bed_y_max: float,
-                 recenter: bool, margin: float, recenter_mode: str, eps: float) -> List[str]:
+def analyze_gcode(path: str, k: float, y_ref: float,bed_x_min: float, bed_x_max: float, bed_y_min: float, bed_y_max: float,
+                 recenter: bool, margin: float, recenter_mode: str) -> List[str]:
     """Analyze the effect of skew (and optional recenter) without rewriting the file."""
     _assert_text_gcode(path)
 
@@ -394,7 +398,7 @@ def analyze_gcode(path: str, k: float, y_ref: float,
     skew_bounds = (0.0, 0.0, 0.0, 0.0)
     if recenter:
         dx, dy, skew_bounds = compute_translation_for_bounds(
-            path, k, y_ref, linearize, arc_seg_mm, arc_max_deg,
+            path, k, y_ref, linearize, 
             bed_x_min, bed_x_max, bed_y_min, bed_y_max, margin,
             recenter_mode, eps
         )
@@ -449,7 +453,7 @@ def analyze_gcode(path: str, k: float, y_ref: float,
             if ARC_RE.match(s):
                 words = parse_words(code)
                 cw = (s.split()[0].upper() == "G2")
-                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
                 for (xi, yi) in pts:
                     upd0(xi, yi)
                     xs, ys = apply_skew_abs(xi, yi, k, y_ref)
@@ -494,22 +498,14 @@ def analyze_gcode(path: str, k: float, y_ref: float,
 # Rewrite the G-code in-place: skew and optional recentering.
 def rewrite(
     path: str,
-    skew_deg: float,
-    arc_seg_mm: float,
-    arc_max_deg: float,
-    recenter: bool,
+    skew_deg: float,recenter: bool,
     bed_x_min: float,
     bed_x_max: float,
     bed_y_min: float,
     bed_y_max: float,
     margin: float,
-    recenter_mode: str,
-    eps: float,
-    shear_y_ref_mode: str,
-    shear_y_ref: float,
-    xy_decimals: int,
-    other_decimals: int,
-    analyze_only: bool,
+    recenter_mode: str,shear_y_ref_mode: str,
+    shear_y_ref: float,analyze_only: bool,
 ) -> None:
     """
     Apply XY skew correction to a PrusaSlicer-generated *text* G-code file.
@@ -531,8 +527,6 @@ def rewrite(
     if shear_y_ref_mode == "auto":
         _, _, ominy, omaxy = compute_inbed_extruding_bounds_original(
             path,
-            arc_seg_mm,
-            arc_max_deg,
             bed_x_min,
             bed_x_max,
             bed_y_min,
@@ -550,15 +544,13 @@ def rewrite(
             path,
             k,
             y_ref,
-            arc_seg_mm,
-            arc_max_deg,
             bed_x_min,
             bed_x_max,
             bed_y_min,
             bed_y_max,
             margin,
             recenter_mode,
-            eps,
+            
         )
 
     # ----- analyze-only path -----
@@ -567,8 +559,6 @@ def rewrite(
             path,
             k,
             y_ref,
-            arc_seg_mm,
-            arc_max_deg,
             bed_x_min,
             bed_x_max,
             bed_y_min,
@@ -576,7 +566,6 @@ def rewrite(
             recenter,
             margin,
             recenter_mode,
-            eps,
         )
         for line in stats:
             print(line)
@@ -587,8 +576,8 @@ def rewrite(
         out.write("; prusaslicer-skew-fix: applied XY skew correction\n")
         out.write(f"; prusaslicer-skew-fix: skew_deg={skew_deg}  k=tan(theta)={k:.10f}\n")
         out.write(f"; prusaslicer-skew-fix: shear_y_ref_mode={shear_y_ref_mode}  shear_y_ref={y_ref:.4f}\n")
-        out.write(f"; prusaslicer-skew-fix: format xy_decimals={xy_decimals} other_decimals={other_decimals}\n")
-        out.write(f"; prusaslicer-skew-fix: linearize_arcs=1  arc_segment_mm={arc_seg_mm}  arc_max_deg={arc_max_deg}\n")
+        out.write(f"; prusaslicer-skew-fix: format XY_DECIMALS={XY_DECIMALS} OTHER_DECIMALS={OTHER_DECIMALS}\n")
+        out.write(f"; prusaslicer-skew-fix: linearize_arcs=1  arc_segment_mm={ARC_SEG_MM}  arc_max_deg={ARC_MAX_DEG}\n")
         if recenter:
             minx, maxx, miny, maxy = skew_bounds
             out.write(
@@ -618,7 +607,7 @@ def rewrite(
         cmd = s.split()[0].upper()
         cw = (cmd == "G2")
 
-        pts = linearize_arc_points(st, words, cw=cw, seg_mm=0.20, max_deg=5.0)
+        pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
         n = len(pts)
 
         has_e = "E" in words
@@ -642,14 +631,14 @@ def rewrite(
         e_accum_print = 0.0
         per_print = 0.0
         if has_e and (not st.abs_e) and n > 0:
-            per_print = round(dE / n, other_decimals)
+            per_print = round(dE / n, OTHER_DECIMALS)
 
         for i, (xi, yi) in enumerate(pts, start=1):
             xs, ys = _skew_and_translate_xy(xi, yi)
 
             l = "G1"
-            l += f" X{fmt_axis('X', xs, xy_decimals, other_decimals)}"
-            l += f" Y{fmt_axis('Y', ys, xy_decimals, other_decimals)}"
+            l += f" X{fmt_axis('X', xs, XY_DECIMALS, OTHER_DECIMALS)}"
+            l += f" Y{fmt_axis('Y', ys, XY_DECIMALS, OTHER_DECIMALS)}"
 
             if has_e:
                 if st.abs_e:
@@ -658,19 +647,19 @@ def rewrite(
                     ei = e0 + dE * t
                     if i == n:
                         ei = e_end
-                    l += f" E{fmt_axis('E', ei, xy_decimals, other_decimals)}"
+                    l += f" E{fmt_axis('E', ei, XY_DECIMALS, OTHER_DECIMALS)}"
                 else:
                     # Relative E: emit increments whose printed sum equals dE.
                     if i < n:
                         ei = per_print
                         e_accum_print += ei
                     else:
-                        ei = round(dE - e_accum_print, other_decimals)
-                    l += f" E{fmt_axis('E', ei, xy_decimals, other_decimals)}"
+                        ei = round(dE - e_accum_print, OTHER_DECIMALS)
+                    l += f" E{fmt_axis('E', ei, XY_DECIMALS, OTHER_DECIMALS)}"
 
             # Preserve feedrate on first emitted line only.
             if has_f and f_word is not None and i == 1:
-                l += f" F{fmt_axis('F', f_word, xy_decimals, other_decimals)}"
+                l += f" F{fmt_axis('F', f_word, XY_DECIMALS, OTHER_DECIMALS)}"
 
             # Preserve the original comment on the first emitted line only.
             if comment and i == 1:
@@ -706,8 +695,8 @@ def rewrite(
                     xs, ys = _skew_and_translate_xy(x_t, y_t)
 
                     # Replace or append ensures stable formatting and preserves other words ordering.
-                    new = replace_or_append(code, "X", xs, xy_places=xy_decimals, other_places=other_decimals)
-                    new = replace_or_append(new, "Y", ys, xy_places=xy_decimals, other_places=other_decimals)
+                    new = replace_or_append(code, "X", xs, xy_places=XY_DECIMALS, other_places=OTHER_DECIMALS)
+                    new = replace_or_append(new, "Y", ys, xy_places=XY_DECIMALS, other_places=OTHER_DECIMALS)
                     out.write(new.rstrip() + ("" if not comment else " " + comment.lstrip()) + "\n")
 
                     # Update position state to the original (unskewed) endpoint.
@@ -809,7 +798,7 @@ def main(argv: List[str]) -> None:
             a.recenter_to_bed, a.bed_x_min, a.bed_x_max, a.bed_y_min, a.bed_y_max, a.margin,
             a.recenter_mode, a.eps,
             a.shear_y_ref_mode, a.shear_y_ref,
-            a.xy_decimals, a.other_decimals,
+            a.XY_DECIMALS, a.OTHER_DECIMALS,
             a.analyze_only)
 
 if __name__ == "__main__":

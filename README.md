@@ -194,7 +194,7 @@ This reproduces the global-origin shear reference and higher-precision formattin
 **Print Settings → Output options → Post-processing scripts**
 
 ```
-python3 /path/to/skew_fix_ps.py   --skew-deg -0.15   --shear-y-ref-mode auto   Arc linearization is ON by default; arc linearization is always enabled   --recenter-to-bed   --recenter-mode clamp
+python3 skew_fix_ps.py --skew-deg -0.15 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp
 ```
 
 Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
