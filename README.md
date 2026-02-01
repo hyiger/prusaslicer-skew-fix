@@ -218,6 +218,12 @@ Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
 
 ---
 
+## Correctness-first output
+
+- If a G0/G1 move specifies **either** X or Y, the script will emit **both** X and Y in the rewritten line.
+  This is required because the shear transform is defined in absolute coordinates and `x'` depends on `y`.
+- Relative XY (G91) output is rejected.
+
 ## License
 
 MIT
