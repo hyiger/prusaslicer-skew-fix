@@ -715,6 +715,10 @@ def rewrite(
                     # Replace or append ensures stable formatting and preserves other words ordering.
                     new = replace_or_append(code, "X", xs, xy_places=XY_DECIMALS, other_places=OTHER_DECIMALS)
                     new = replace_or_append(new, "Y", ys, xy_places=XY_DECIMALS, other_places=OTHER_DECIMALS)
+                    # Normalize formatting for other axes present on the same motion line.
+                    for ax in ("Z", "E", "F"):
+                        if ax in words:
+                            new = replace_or_append(new, ax, words[ax], xy_places=XY_DECIMALS, other_places=OTHER_DECIMALS)
                     out.write(new.rstrip() + ("" if not comment else " " + comment.lstrip()) + "\n")
 
                     # Update position state to the original (unskewed) endpoint.
@@ -810,6 +814,10 @@ def main(argv: List[str]) -> None:
 
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
+    # Apply formatting settings from CLI. These are used throughout rewrite() via globals.
+    global XY_DECIMALS, OTHER_DECIMALS
+    XY_DECIMALS = a.xy_decimals
+    OTHER_DECIMALS = a.other_decimals
 
     path = a.gcode
 
