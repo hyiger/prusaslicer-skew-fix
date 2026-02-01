@@ -599,7 +599,7 @@ def rewrite(
         if recenter:
             minx, maxx, miny, maxy = skew_bounds
             out.write(
-                f"; prusaslicer-skew-fix: recenter_to_bed=1  mode={recenter_mode}  margin={margin}  eps={eps}\n"
+                f"; prusaslicer-skew-fix: recenter_to_bed=1  mode={recenter_mode}  margin={margin}  eps={EPS}\n"
             )
             out.write(
                 f"; prusaslicer-skew-fix: in-bed extruding skewed bounds X[{minx:.3f},{maxx:.3f}] Y[{miny:.3f},{maxy:.3f}]\n"
