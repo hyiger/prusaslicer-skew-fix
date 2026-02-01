@@ -25,8 +25,7 @@ def test_rewrite_auto_y_ref_uses_extruding_y_center(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,
-        linearize=False, arc_seg_mm=0.2, arc_max_deg=5.0,
+        skew_deg=-0.15,arc_seg_mm=0.20, arc_max_deg=5.0,
         recenter=False,
         bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
         recenter_mode="center", eps=0.01,
@@ -58,8 +57,7 @@ def test_rewrite_linearize_arcs_emits_g1_only(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,
-        linearize=True, arc_seg_mm=5.0, arc_max_deg=90.0,  # coarse to keep few points
+        skew_deg=-0.15,arc_seg_mm=0.20, arc_max_deg=5.0,  # coarse to keep few points
         recenter=False,
         bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
         recenter_mode="center", eps=0.01,
@@ -81,8 +79,7 @@ def test_binary_guard_rejects_bgcode(tmp_path, load_module):
     with pytest.raises(SystemExit):
         m.rewrite(
             str(p),
-            skew_deg=-0.15,
-            linearize=False, arc_seg_mm=0.2, arc_max_deg=5.0,
+            skew_deg=-0.15,arc_seg_mm=0.20, arc_max_deg=5.0,
             recenter=False,
             bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
             recenter_mode="center", eps=0.01,

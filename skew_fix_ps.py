@@ -228,7 +228,7 @@ def _choose_translation(lo: float, hi: float, mode: str) -> float:
 
 
 # Compute original (unskewed) in-bed extruding bounds (endpoints only for G0/G1, optional linearized arc points).
-def compute_inbed_extruding_bounds_original(path: str, linearize: bool,
+def compute_inbed_extruding_bounds_original(path: str,
                                            arc_seg_mm: float, arc_max_deg: float,
                                            bed_x_min: float, bed_x_max: float,
                                            bed_y_min: float, bed_y_max: float) -> Tuple[float,float,float,float]:
@@ -254,25 +254,20 @@ def compute_inbed_extruding_bounds_original(path: str, linearize: bool,
                 continue
 
             if ARC_RE.match(s):
+                # Always include linearized arc points (circles -> ellipses under shear, so arcs are always linearized elsewhere too).
                 words = parse_words(code)
-                extruding = _is_extruding_move(st, words)
-
-                if extruding:
-                    if linearize:
-                        cw = (s.split()[0].upper() == "G2")
-                        pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
-                        for (xi, yi) in pts:
-                            if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                                upd(xi, yi)
-                    else:
-                        x1, y1 = _arc_end_abs(st, words)
-                        if _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                            upd(x1, y1)
-
-                x1, y1 = _arc_end_abs(st, words)
-                st.x, st.y = x1, y1
+                cmd = s.split()[0].upper()
+                cw = (cmd == "G2")
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                for (xi, yi) in pts:
+                    if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
+                        minx = min(minx, xi); maxx = max(maxx, xi)
+                        miny = min(miny, yi); maxy = max(maxy, yi)
+                st.x, st.y = pts[-1]
                 if "E" in words:
                     st.e = words["E"] if st.abs_e else (st.e + words["E"])
+                if "F" in words:
+                    st.f = words["F"]
                 continue
 
             if MOVE_RE.match(s):
@@ -331,28 +326,21 @@ def compute_translation_for_bounds(path: str, k: float, y_ref: float, linearize:
                 raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 
             if ARC_RE.match(s):
+                # Always include linearized arc points (circles -> ellipses under shear, so arcs are always linearized elsewhere too).
                 words = parse_words(code)
-                extruding = _is_extruding_move(st, words)
-
-                if extruding:
-                    if linearize:
-                        cw = (s.split()[0].upper() == "G2")
-                        pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
-                        for (xi, yi) in pts:
-                            if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                                xs, ys = apply_skew_abs(xi, yi, k, y_ref)
-                                upd(xs, ys)
-                    else:
-                        x1, y1 = _arc_end_abs(st, words)
-                        if _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                            xs, ys = apply_skew_abs(x1, y1, k, y_ref)
-                            upd(xs, ys)
-
-                x1, y1 = _arc_end_abs(st, words)
-                st.x, st.y = x1, y1
-                if "E" in words:
-                    st.e = words["E"] if st.abs_e else (st.e + words["E"])
-                continue
+                cmd = s.split()[0].upper()
+                cw = (cmd == "G2")
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                for (xi, yi) in pts:
+                    if bed_x_min <= xi <= bed_x_max and bed_y_min <= yi <= bed_y_max:
+                        minx = min(minx, xi); maxx = max(maxx, xi)
+                        miny = min(miny, yi); maxy = max(maxy, yi)
+                st.x, st.y = pts[-1]
+            if "E" in words:
+                st.e = words["E"] if st.abs_e else (st.e + words["E"])
+            if "F" in words:
+                st.f = words["F"]
+            continue
 
             if MOVE_RE.match(s):
                 words = parse_words(code)
@@ -460,27 +448,19 @@ def analyze_gcode(path: str, k: float, y_ref: float,
 
             if ARC_RE.match(s):
                 words = parse_words(code)
-                if linearize:
-                    cw = (s.split()[0].upper() == "G2")
-                    pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
-                    for (xi, yi) in pts:
-                        upd0(xi, yi)
-                        xs, ys = apply_skew_abs(xi, yi, k, y_ref)
-                        xs += dx; ys += dy
-                        upd1(xs, ys)
-                        max_abs_dx = max(max_abs_dx, abs(xs - xi))
-                    st.x, st.y = pts[-1]
-                else:
-                    x1, y1 = _arc_end_abs(st, words)
-                    upd0(x1, y1)
-                    xs, ys = apply_skew_abs(x1, y1, k, y_ref)
+                cw = (s.split()[0].upper() == "G2")
+                pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
+                for (xi, yi) in pts:
+                    upd0(xi, yi)
+                    xs, ys = apply_skew_abs(xi, yi, k, y_ref)
                     xs += dx; ys += dy
                     upd1(xs, ys)
-                    max_abs_dx = max(max_abs_dx, abs(xs - x1))
-                    st.x, st.y = x1, y1
-
+                    max_abs_dx = max(max_abs_dx, abs(xs - xi))
+                st.x, st.y = pts[-1]
                 if "E" in words:
                     st.e = words["E"] if st.abs_e else (st.e + words["E"])
+                if "F" in words:
+                    st.f = words["F"]
                 continue
 
     lines: List[str] = []
@@ -502,12 +482,19 @@ def analyze_gcode(path: str, k: float, y_ref: float,
     return lines
 
 
-# Rewrite the G-code in-place: optional arc linearization, skew, and optional recentering.
-# Rewrite the G-code in-place: optional arc linearization, skew, and optional recentering.
+# Rewrite the G-code in-place: arc linearization is ALWAYS enabled.
+# HARD-CODED ARC LINEARIZATION PARAMETERS (correctness-first):
+#   segment length = 0.20 mm
+#   max angle per segment = 5.0 degrees
+# Rewrite the G-code in-place: skew and optional recentering.
+# Rewrite the G-code in-place: arc linearization is ALWAYS enabled.
+# HARD-CODED ARC LINEARIZATION PARAMETERS (correctness-first):
+#   segment length = 0.20 mm
+#   max angle per segment = 5.0 degrees
+# Rewrite the G-code in-place: skew and optional recentering.
 def rewrite(
     path: str,
     skew_deg: float,
-    linearize: bool,
     arc_seg_mm: float,
     arc_max_deg: float,
     recenter: bool,
@@ -544,7 +531,6 @@ def rewrite(
     if shear_y_ref_mode == "auto":
         _, _, ominy, omaxy = compute_inbed_extruding_bounds_original(
             path,
-            linearize,
             arc_seg_mm,
             arc_max_deg,
             bed_x_min,
@@ -564,7 +550,6 @@ def rewrite(
             path,
             k,
             y_ref,
-            linearize,
             arc_seg_mm,
             arc_max_deg,
             bed_x_min,
@@ -582,7 +567,6 @@ def rewrite(
             path,
             k,
             y_ref,
-            linearize,
             arc_seg_mm,
             arc_max_deg,
             bed_x_min,
@@ -604,12 +588,7 @@ def rewrite(
         out.write(f"; prusaslicer-skew-fix: skew_deg={skew_deg}  k=tan(theta)={k:.10f}\n")
         out.write(f"; prusaslicer-skew-fix: shear_y_ref_mode={shear_y_ref_mode}  shear_y_ref={y_ref:.4f}\n")
         out.write(f"; prusaslicer-skew-fix: format xy_decimals={xy_decimals} other_decimals={other_decimals}\n")
-        if linearize:
-            out.write(
-                f"; prusaslicer-skew-fix: linearize_arcs=1  arc_segment_mm={arc_seg_mm}  arc_max_deg={arc_max_deg}\n"
-            )
-        else:
-            out.write("; prusaslicer-skew-fix: linearize_arcs=0\n")
+        out.write(f"; prusaslicer-skew-fix: linearize_arcs=1  arc_segment_mm={arc_seg_mm}  arc_max_deg={arc_max_deg}\n")
         if recenter:
             minx, maxx, miny, maxy = skew_bounds
             out.write(
@@ -627,25 +606,18 @@ def rewrite(
         return xs + dx, ys + dy
 
     def _process_arc(line: str, code: str, comment: str, s: str) -> None:
-        # Arcs are optional: either pass through untouched OR linear knowing circles become ellipses under shear.
+        """Process a single G2/G3 arc.
+
+        Arcs are ALWAYS linearized to G1 segments before skewing.
+        A shear transform turns circles into ellipses, which firmware arc commands cannot represent.
+        """
         words = parse_words(code)
         cmd = s.split()[0].upper()
         cw = (cmd == "G2")
 
-        if not linearize:
-            # Pass-through, but still update state.
-            x1, y1 = _arc_end_abs(st, words)
-            st.x, st.y = x1, y1
-            if "E" in words:
-                st.e = words["E"] if st.abs_e else (st.e + words["E"])
-            if "F" in words:
-                st.f = words["F"]
-            out.write(line + "\n")
-            return
+        # Fixed, correctness-first segmentation parameters.
+        pts = linearize_arc_points(st, words, cw=cw, seg_mm=0.20, max_deg=5.0)
 
-        pts = linearize_arc_points(st, words, cw=cw, seg_mm=arc_seg_mm, max_deg=arc_max_deg)
-
-        # Extrusion distribution across segments.
         has_e = "E" in words
         e0 = st.e
         if has_e:
@@ -662,24 +634,23 @@ def rewrite(
         has_f = "F" in words
         f_word = words.get("F", None)
 
+        n = len(pts)
         for i, (xi, yi) in enumerate(pts, start=1):
             xs, ys = _skew_and_translate_xy(xi, yi)
 
             l = "G1"
-            l += (
-                f" X{fmt_axis('X', xs, xy_decimals, other_decimals)}"
-                f" Y{fmt_axis('Y', ys, xy_decimals, other_decimals)}"
-            )
+            l += f" X{fmt_axis('X', xs, xy_decimals, other_decimals)}"
+            l += f" Y{fmt_axis('Y', ys, xy_decimals, other_decimals)}"
 
             if has_e:
                 if st.abs_e:
-                    t = i / len(pts)
+                    t = i / n
                     ei = e0 + dE * t
-                    if i == len(pts):
+                    if i == n:
                         ei = e_end
                     l += f" E{fmt_axis('E', ei, xy_decimals, other_decimals)}"
                 else:
-                    l += f" E{fmt_axis('E', (dE / len(pts)), xy_decimals, other_decimals)}"
+                    l += f" E{fmt_axis('E', (dE / n), xy_decimals, other_decimals)}"
 
             # Preserve feedrate on first segment only.
             if has_f and f_word is not None and i == 1:
@@ -691,7 +662,7 @@ def rewrite(
 
             out.write(l + "\n")
 
-        # Update state to absolute arc endpoint.
+        # Update state to original (unskewed) arc endpoint.
         st.x, st.y = pts[-1]
         if has_e:
             st.e = e_end
@@ -798,12 +769,8 @@ def main(argv: List[str]) -> None:
     ap.add_argument("--analyze-only", action="store_true",
                     help="Analyze the skew/recenter effect and print metrics, but do not rewrite the file.")
 
-    ap.add_argument("--linearize-arcs", action="store_true",
-                    help="Convert G2/G3 arcs to G1 segments before applying skew (recommended if arcs exist)")
-    ap.add_argument("--arc-segment-mm", type=float, default=0.20,
-                    help="Target max chord length for arc linearization (mm).")
-    ap.add_argument("--arc-max-deg", type=float, default=5.0,
-                    help="Max angle per segment for arc linearization (degrees).")
+    ap.add_argument("--no-linearize-arcs", action="store_true",
+                    help="Arc linearization is always enabled (NOT recommended; arcs become geometrically incorrect under shear)")
 
     ap.add_argument("--recenter-to-bed", action="store_true",
                     help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
@@ -820,7 +787,7 @@ def main(argv: List[str]) -> None:
     a = ap.parse_args(argv)
 
     rewrite(a.gcode, a.skew_deg,
-            a.linearize_arcs, a.arc_segment_mm, a.arc_max_deg,
+            0.20, 5.0,
             a.recenter_to_bed, a.bed_x_min, a.bed_x_max, a.bed_y_min, a.bed_y_max, a.margin,
             a.recenter_mode, a.eps,
             a.shear_y_ref_mode, a.shear_y_ref,

@@ -110,13 +110,11 @@ A shear transform does **not** preserve circles — circles become ellipses.
 If your G-code contains `G2` or `G3`, you **must** enable arc linearization (convert arcs into short `G1` segments):
 
 ```
---linearize-arcs
+Arc linearization is ON by default; arc linearization is always enabled
 ```
 
 Defaults:
-- `--arc-segment-mm 0.20`
-- `--arc-max-deg 5.0`
-
+- `- `
 This avoids preview artifacts and ensures printed geometry matches the math.
 
 ---
@@ -196,7 +194,7 @@ This reproduces the global-origin shear reference and higher-precision formattin
 **Print Settings → Output options → Post-processing scripts**
 
 ```
-python3 /path/to/skew_fix_ps.py   --skew-deg -0.15   --shear-y-ref-mode auto   --linearize-arcs   --recenter-to-bed   --recenter-mode clamp
+python3 /path/to/skew_fix_ps.py   --skew-deg -0.15   --shear-y-ref-mode auto   Arc linearization is ON by default; arc linearization is always enabled   --recenter-to-bed   --recenter-mode clamp
 ```
 
 Do **not** add `[output_filepath]` — PrusaSlicer supplies it automatically.
@@ -256,3 +254,10 @@ Max |ΔX|: ...
 Recenter shift applied:        ΔX=...  ΔY=...
 Final bounds (in bed):         X[...,...]  Y[...,...]
 ```
+
+
+### Arc handling
+Arc linearization is **always enabled** and uses fixed, correctness-first parameters:
+- segment length: 0.20 mm
+- max angle per segment: 5.0°
+These values are not configurable to avoid incorrect toolpaths.

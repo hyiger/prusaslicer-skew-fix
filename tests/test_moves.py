@@ -39,9 +39,7 @@ def test_y_only_move_emits_x_for_correct_shear(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,
-        linearize=False,
-        arc_seg_mm=0.2,
+        skew_deg=-0.15,arc_seg_mm=0.20,
         arc_max_deg=5.0,
         recenter=False,
         bed_x_min=0.0,
@@ -88,9 +86,7 @@ def test_negative_coordinates_are_supported(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,
-        linearize=False,
-        arc_seg_mm=0.2,
+        skew_deg=-0.15,arc_seg_mm=0.20,
         arc_max_deg=5.0,
         recenter=False,
         bed_x_min=0.0,
@@ -135,9 +131,7 @@ def test_extruder_only_moves_are_preserved(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=-0.15,
-        linearize=False,
-        arc_seg_mm=0.2,
+        skew_deg=-0.15,arc_seg_mm=0.20,
         arc_max_deg=5.0,
         recenter=False,
         bed_x_min=0.0,
@@ -179,9 +173,7 @@ def test_zero_skew_preserves_endpoints(tmp_path, load_module):
 
     m.rewrite(
         str(g),
-        skew_deg=0.0,
-        linearize=False,
-        arc_seg_mm=0.2,
+        skew_deg=0.0,arc_seg_mm=0.20,
         arc_max_deg=5.0,
         recenter=False,
         bed_x_min=0.0,
