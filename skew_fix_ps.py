@@ -684,7 +684,7 @@ def rewrite(
                     out.write(line + "\n")
                 else:
                     if not st.abs_xy:
-                        raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) not supported for skew output.")
+                        raise SystemExit("prusaslicer-skew-fix: ERROR: relative XY (G91) is not supported. PrusaSlicer emits absolute XY (G90) toolpaths; relative XY would make skew compensation ambiguous.")
                     if recenter and not st.abs_xy:
                         raise SystemExit("prusaslicer-skew-fix: ERROR: --recenter-to-bed requires absolute XY (G90).")
 

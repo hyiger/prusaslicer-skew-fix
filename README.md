@@ -261,3 +261,24 @@ Arc linearization is **always enabled** and uses fixed, correctness-first parame
 - segment length: 0.20 mm
 - max angle per segment: 5.0°
 These values are not configurable to avoid incorrect toolpaths.
+
+
+## Non-goals
+
+This tool is intentionally **not** a general-purpose G-code motion planner.
+The following behaviors are explicitly out of scope:
+
+- **Relative XY motion (G91)**  
+  PrusaSlicer always emits absolute XY coordinates (G90) for print toolpaths.
+  Supporting relative XY would require full motion-state replay and would make
+  skew correction ambiguous. Files containing G91 XY motion are rejected.
+
+- Preserving firmware-level arc commands (G2/G3)  
+  All arcs are always linearized to G1 segments before skew compensation.
+
+- Minimizing G-code size  
+  Correctness and dimensional accuracy take priority over file size.
+
+- Backwards compatibility with older versions of this tool  
+  Tests and behavior lock in current design decisions.
+
