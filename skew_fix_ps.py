@@ -110,6 +110,61 @@ def fmt_axis(axis: str, v: float, xy_places: int, other_places: int) -> str:
     return _fmt_fixed(v, places)
 
 
+
+# ---- Skew derivation helpers (measurement-based) ----
+
+def _parse_csv_floats(spec: str, count: int, *, label: str) -> List[float]:
+    parts = [p.strip() for p in spec.split(",") if p.strip() != ""]
+    if len(parts) != count:
+        raise ValueError(f"{label}: expected {count} comma-separated numbers")
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError as e:
+        raise ValueError(f"{label}: all values must be numbers") from e
+    if any(v <= 0 for v in vals):
+        raise ValueError(f"{label}: all values must be positive")
+    return vals
+
+def skew_deg_from_square(spec: str) -> float:
+    """Derive skew angle (degrees) from square measurements AC,BD,AD.
+
+    Uses Marlin-compatible shear model:
+        tan(theta) = (AC - BD) / (2 * AD)
+    """
+    ac, bd, ad = _parse_csv_floats(spec, 3, label="--skew-from-square (AC,BD,AD)")
+    k = (ac - bd) / (2.0 * ad)
+    return math.degrees(math.atan(k))
+
+def skew_deg_from_rectangle(spec: str) -> float:
+    """Derive skew angle (degrees) from rectangle measurements AC,BD,AD,AB.
+
+    Rectangle labeling:
+
+        A -------- B
+        |          |
+        D -------- C
+
+    Uses Marlin-compatible shear model:
+        tan(theta) = (AC - BD) / (2 * AD)
+
+    AB is used for a sanity-check (diagonal length should be close to hypot(AB, AD)).
+    """
+    ac, bd, ad, ab = _parse_csv_floats(spec, 4, label="--skew-from-rectangle (AC,BD,AD,AB)")
+    expected = math.hypot(ab, ad)
+    avg = 0.5 * (ac + bd)
+    # Warn (but do not fail) if the measured diagonals look inconsistent with the side lengths.
+    # Tolerance: max(0.25 mm, 0.25% of expected diagonal).
+    tol = max(0.25, 0.0025 * expected)
+    if abs(avg - expected) > tol:
+        print(
+            "prusaslicer-skew-fix: WARNING: rectangle sanity check failed: "
+            f"avg_diag={avg:.3f} vs hypot(AB,AD)={expected:.3f} (tol {tol:.3f}). "
+            "Check labeling/measurements.",
+            file=sys.stderr,
+        )
+    k = (ac - bd) / (2.0 * ad)
+    return math.degrees(math.atan(k))
+
 # Replace an axis value in a G-code line, or append it if missing.
 def replace_or_append(code: str, axis: str, val: float, *, xy_places: int, other_places: int) -> str:
     """Replace an axis value in a G-code line, or append it if missing."""
@@ -782,29 +837,66 @@ def rewrite(
 # CLI entry point used by PrusaSlicer post-processing.
 def main(argv: List[str]) -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skew-deg", type=float, required=True, help="XY skew angle in degrees (e.g. -0.15)")
 
-    ap.add_argument("--shear-y-ref-mode", choices=["auto", "fixed"], default="auto",
-                    help="Shear reference for x' = x + (y - y_ref)*tan(theta). "
-                         "auto uses the in-bed EXTRUDING Y-center; fixed uses --shear-y-ref.")
-    ap.add_argument("--shear-y-ref", type=float, default=0.0,
-                    help="Fixed y_ref for shear (only used when --shear-y-ref-mode=fixed).")
+    ap.add_argument(
+        "--skew-deg",
+        type=float,
+        default=None,
+        help="XY skew angle in degrees (e.g. -0.15). Mutually exclusive with --skew-from-square/--skew-from-rectangle.",
+    )
+    ap.add_argument(
+        "--skew-from-square",
+        type=str,
+        default=None,
+        help="Derive skew angle from square measurements: AC,BD,AD (mm).",
+    )
+    ap.add_argument(
+        "--skew-from-rectangle",
+        type=str,
+        default=None,
+        help="Derive skew angle from rectangle measurements: AC,BD,AD,AB (mm).",
+    )
 
-    ap.add_argument("--xy-decimals", type=int, default=3,
-                    help="Decimal places to emit for X/Y values (default 3).")
-    ap.add_argument("--other-decimals", type=int, default=5,
-                    help="Decimal places for E/F/Z/I/J/K/etc. (default 5).")
+    ap.add_argument(
+        "--shear-y-ref-mode",
+        choices=["auto", "fixed"],
+        default="auto",
+        help="Shear reference for x' = x + (y - y_ref)*tan(theta). "
+             "auto uses the in-bed EXTRUDING Y-center; fixed uses --shear-y-ref.",
+    )
+    ap.add_argument(
+        "--shear-y-ref",
+        type=float,
+        default=0.0,
+        help="Fixed y_ref for shear (only used when --shear-y-ref-mode=fixed).",
+    )
 
-    ap.add_argument("--analyze-only", action="store_true",
-                    help="Analyze the skew/recenter effect and print metrics, but do not rewrite the file.")
+    ap.add_argument("--xy-decimals", type=int, default=3, help="Decimal places to emit for X/Y values (default 3).")
+    ap.add_argument("--other-decimals", type=int, default=5, help="Decimal places for E/F/Z/I/J/K/etc. (default 5).")
 
-    ap.add_argument("--no-linearize-arcs", action="store_true",
-                    help="Arc linearization is always enabled (NOT recommended; arcs become geometrically incorrect under shear)")
+    ap.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="Analyze the skew/recenter effect and print metrics, but do not rewrite the file.",
+    )
 
-    ap.add_argument("--recenter-to-bed", action="store_true",
-                    help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
-    ap.add_argument("--recenter-mode", choices=["center", "clamp"], default="center",
-                    help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.")
+    ap.add_argument(
+        "--no-linearize-arcs",
+        action="store_true",
+        help="Arc linearization is always enabled (NOT recommended; arcs become geometrically incorrect under shear)",
+    )
+
+    ap.add_argument(
+        "--recenter-to-bed",
+        action="store_true",
+        help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).",
+    )
+    ap.add_argument(
+        "--recenter-mode",
+        choices=["center", "clamp"],
+        default="center",
+        help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.",
+    )
     ap.add_argument("--bed-x-min", type=float, default=0.0)
     ap.add_argument("--bed-x-max", type=float, default=250.0)
     ap.add_argument("--bed-y-min", type=float, default=0.0)
@@ -814,16 +906,35 @@ def main(argv: List[str]) -> None:
 
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
+
     # Apply formatting settings from CLI. These are used throughout rewrite() via globals.
     global XY_DECIMALS, OTHER_DECIMALS
     XY_DECIMALS = a.xy_decimals
     OTHER_DECIMALS = a.other_decimals
 
+    # Exactly one skew specification method must be provided.
+    skew_sources = [a.skew_deg is not None, a.skew_from_square is not None, a.skew_from_rectangle is not None]
+    if sum(1 for s in skew_sources if s) != 1:
+        ap.error("Specify exactly one of --skew-deg, --skew-from-square, or --skew-from-rectangle")
+
+    if a.skew_from_square is not None:
+        try:
+            skew_deg = skew_deg_from_square(a.skew_from_square)
+        except ValueError as e:
+            ap.error(str(e))
+    elif a.skew_from_rectangle is not None:
+        try:
+            skew_deg = skew_deg_from_rectangle(a.skew_from_rectangle)
+        except ValueError as e:
+            ap.error(str(e))
+    else:
+        skew_deg = a.skew_deg
+
     path = a.gcode
 
     rewrite(
         path,
-        skew_deg=a.skew_deg,
+        skew_deg=skew_deg,
         shear_y_ref_mode=a.shear_y_ref_mode,
         shear_y_ref=a.shear_y_ref,
         recenter=a.recenter_to_bed,
@@ -835,6 +946,7 @@ def main(argv: List[str]) -> None:
         recenter_mode=a.recenter_mode,
         analyze_only=a.analyze_only,
     )
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
