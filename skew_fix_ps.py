@@ -793,13 +793,22 @@ def main(argv: List[str]) -> None:
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
 
-    rewrite(a.gcode, a.skew_deg,
-            0.20, 5.0,
-            a.recenter_to_bed, a.bed_x_min, a.bed_x_max, a.bed_y_min, a.bed_y_max, a.margin,
-            a.recenter_mode, a.eps,
-            a.shear_y_ref_mode, a.shear_y_ref,
-            a.XY_DECIMALS, a.OTHER_DECIMALS,
-            a.analyze_only)
+    path = a.path
+
+    rewrite(
+        path,
+        skew_deg=a.skew_deg,
+        shear_y_ref_mode=a.shear_y_ref_mode,
+        shear_y_ref=a.shear_y_ref,
+        recenter=a.recenter_to_bed,
+        bed_x_min=a.bed_x_min,
+        bed_x_max=a.bed_x_max,
+        bed_y_min=a.bed_y_min,
+        bed_y_max=a.bed_y_max,
+        margin=a.margin,
+        recenter_mode=a.recenter_mode,
+        analyze_only=a.analyze_only,
+    )
 
 if __name__ == "__main__":
     main(sys.argv[1:])
