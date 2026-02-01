@@ -96,7 +96,7 @@ def test_negative_coordinates_are_supported(tmp_path, load_module):
     )
 
     out = g.read_text(encoding="utf-8").splitlines()
-    move = next((ln for ln in out if ln.strip().startswith("G1") and "E1.0" in ln), None)
+    move = next((ln for ln in out if ln.strip().startswith("G1") and re.search(r"\bE1(?:\.0+)?\b", ln)), None)
     assert move is not None
     xy = _extract_first_move_xy(move)
     assert xy is not None

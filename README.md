@@ -171,23 +171,12 @@ This prevents false “cannot fit” errors caused by floating-point rounding.
 
 ## Output formatting (decimal places)
 
-By default the script emits:
+By default, for motion lines it rewrites (`G0`/`G1`, including any arc-linearized `G1` segments), the script:
 
-- X/Y with **3** decimals (`--xy-decimals 3`)
-- Other axes (E/F/Z/I/J/K/...) with **5** decimals (`--other-decimals 5`)
+- Rounds X/Y to **3** decimal places (`--xy-decimals 3`)
+- Rounds other axes (E/F/Z/...) to **5** decimal places (`--other-decimals 5`)
 
-This significantly reduces file size and keeps the output well within mechanical resolution.
-
-## Backward compatibility
-
-If you need output that is geometrically identical to older versions of this tool, use:
-
-```bash
---shear-y-ref-mode fixed --shear-y-ref 0 --xy-decimals 5 --other-decimals 5
-```
-
-This reproduces the global-origin shear reference and higher-precision formatting used by earlier releases.
-
+Trailing zeros are trimmed (e.g. `Y10.000` becomes `Y10`), which keeps the output compact while preserving the requested precision.
 
 ## Recommended PrusaSlicer setup
 
@@ -281,4 +270,3 @@ The following behaviors are explicitly out of scope:
 
 - Backwards compatibility with older versions of this tool  
   Tests and behavior lock in current design decisions.
-
