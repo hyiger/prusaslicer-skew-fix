@@ -123,59 +123,7 @@ If PrusaSlicer outputs `.bgcode`, disable Binary G-code and re-slice.
 
 ## Diagrams
 
-### 1) End-to-end processing flow
-
-```mermaid
-flowchart TD
-  A["PrusaSlicer exports text .gcode"] --> B["Run skew_fix_ps.py as post-process"]
-  B --> C["Validate input (text G-code only, reject binary)"]
-  C --> D["Parse moves and modal state"]
-  D --> E["Linearize G2/G3 arcs to G1 segments"]
-  E --> F["Compute shear reference y_ref (auto or fixed)"]
-  F --> G["Apply XY shear transform"]
-  G --> H{"--recenter-to-bed enabled?"}
-  H -- "No" --> I["Write rewritten G-code"]
-  H -- "Yes" --> J["Compute in-bed extruding bounds"]
-  J --> K["Compute shift (center or clamp)"]
-  K --> I
-```
-
-### 2) XY skew transform model
-
-```mermaid
-flowchart LR
-  A["Input point (x, y)"] --> B["k = tan(theta)"]
-  B --> C["x' = x + (y - y_ref) * k"]
-  A --> D["y' = y"]
-  C --> E["Output point (x', y')"]
-  D --> E
-```
-
-### 3) Recenter decision flow
-
-```mermaid
-flowchart TD
-  A["Skewed toolpath produced"] --> B["Extract in-bed extruding bounds"]
-  B --> C["Apply margin to bed limits"]
-  C --> D{"Fits with current position?"}
-  D -- "Yes" --> E["Shift dx=0, dy=0"]
-  D -- "No" --> F{"Recenter mode"}
-  F -- "center" --> G["Use allowable-interval midpoint"]
-  F -- "clamp" --> H["Use minimum valid shift"]
-  G --> I["Apply XY translation"]
-  H --> I
-  E --> J["Emit final G-code"]
-  I --> J
-```
-
-### 4) Arc handling
-
-```mermaid
-flowchart TD
-  A["Arc command (G2/G3)"] --> B["Linearize arc into short G1 segments"]
-  B --> C["Apply shear to each segment endpoint"]
-  C --> D["Write transformed G1 sequence"]
-```
+All diagrams are in [`DIAGRAMS.md`](DIAGRAMS.md) under the **README Diagrams** section.
 
 ## Assumptions and Limits
 
