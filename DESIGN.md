@@ -119,3 +119,61 @@ For most users:
 ```
 
 This produces correct geometry and avoids clipping without being affected by purge/wipe macros.
+
+---
+
+## Diagrams
+
+### 1) Modal state machine (parsing)
+
+```mermaid
+stateDiagram-v2
+  [*] --> ABS_XY
+  ABS_XY --> REL_XY: "G91"
+  REL_XY --> ABS_XY: "G90"
+
+  state "Extrusion Mode" as EMode {
+    [*] --> ABS_E
+    ABS_E --> REL_E: "M83"
+    REL_E --> ABS_E: "M82"
+  }
+
+  state "Arc Center Mode" as IJMode {
+    [*] --> REL_IJ
+    REL_IJ --> ABS_IJ: "G90.1"
+    ABS_IJ --> REL_IJ: "G91.1"
+  }
+```
+
+### 2) Recenter interval math
+
+```mermaid
+flowchart TD
+  A["Skewed in-bed extruding bounds: minx,maxx,miny,maxy"] --> B["Compute allowed dx interval"]
+  B --> C["dx_lo = (bed_x_min + margin) - minx"]
+  B --> D["dx_hi = (bed_x_max - margin) - maxx"]
+  A --> E["Compute allowed dy interval"]
+  E --> F["dy_lo = (bed_y_min + margin) - miny"]
+  E --> G["dy_hi = (bed_y_max - margin) - maxy"]
+  C --> H{"Intervals valid (with EPS)?"}
+  D --> H
+  F --> H
+  G --> H
+  H -- "No" --> I["Fail: cannot fit after skew"]
+  H -- "Yes" --> J{"Mode"}
+  J -- "center" --> K["dx,dy = midpoint of each interval"]
+  J -- "clamp" --> L["dx,dy = minimum valid shift (prefer 0)"]
+```
+
+### 3) Arc linearization and E handling
+
+```mermaid
+flowchart TD
+  A["Read arc G2/G3 with modal state"] --> B["Linearize to G1 points (0.20 mm, 5.0 degrees max)"]
+  B --> C["Apply shear to each point"]
+  C --> D{"Extrusion mode"}
+  D -- "M82 absolute E" --> E["Emit cumulative E values on generated G1 lines"]
+  D -- "M83 relative E" --> F["Distribute arc delta-E so segment E values sum to original"]
+  E --> G["Update state to original arc endpoint"]
+  F --> G
+```

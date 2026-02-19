@@ -157,6 +157,58 @@ Always verify skew correction with:
 
 ---
 
+## Diagrams
+
+### 1) Method selection decision tree
+
+```mermaid
+flowchart TD
+  A["Need XY skew estimate"] --> B{"Can print Califlower v2?"}
+  B -- "Yes" --> C["Use Califlower v2 result"]
+  C --> D["Pass angle with --skew-deg"]
+  B -- "No" --> E{"Can measure large square diagonals accurately?"}
+  E -- "Yes" --> F["Use square method"]
+  F --> G["Pass AC,BD,AD with --skew-from-square"]
+  E -- "No" --> H{"Have rectangle diagonal/side measurements?"}
+  H -- "Yes" --> I["Use rectangle method as estimate"]
+  I --> J["Pass AC,BD,AD,AB with --skew-from-rectangle"]
+  H -- "No" --> K["Use mechanical checks only as diagnostic"]
+```
+
+### 2) Measurement geometry to CLI mapping
+
+```mermaid
+flowchart TD
+  A["Rectangle corners: A,B,C,D"] --> B["Diagonal AC"]
+  A --> C["Diagonal BD"]
+  A --> D["Side AD"]
+  A --> E["Side AB"]
+  B --> F["--skew-from-square AC,BD,AD"]
+  C --> F
+  D --> F
+  B --> G["--skew-from-rectangle AC,BD,AD,AB"]
+  C --> G
+  D --> G
+  E --> G
+```
+
+### 3) Measurement error sources and mitigation
+
+```mermaid
+flowchart LR
+  A["Input measurements"] --> B{"Primary error source"}
+  B -- "Caliper resolution/noise" --> C["Print larger test artifact"]
+  B -- "Elephant foot / first-layer artifacts" --> D["Ignore bottom region or post-process edges"]
+  B -- "Corner rounding / slicer compensation" --> E["Prefer Califlower v2 or repeat and average"]
+  B -- "Single-run variance" --> F["Repeat measurements and average"]
+  C --> G["More stable skew estimate"]
+  D --> G
+  E --> G
+  F --> G
+```
+
+---
+
 ## Summary
 
 If possible:
