@@ -43,6 +43,8 @@ Or you can pass measurements and let the script derive the angle:
 --skew-from-rectangle AC,BD,AD,AB
 ```
 
+`--skew-from-rectangle` accepts `AB` for input compatibility, but the current formula uses `AC`, `BD`, and `AD`.
+
 If you want confidence that you are correcting *geometry* rather than compensating for
 extrusion artifacts, Califlower v2 is strongly recommended.
 

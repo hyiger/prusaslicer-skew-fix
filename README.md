@@ -175,7 +175,7 @@ Current command-line options:
 - Exactly one skew source is required:
   - `--skew-deg`: XY skew angle in degrees
   - `--skew-from-square AC,BD,AD`: derive skew from square measurements
-  - `--skew-from-rectangle AC,BD,AD,AB`: derive skew from rectangle measurements
+  - `--skew-from-rectangle AC,BD,AD,AB`: derive skew from rectangle measurements (`AB` is accepted but not currently used in the calculation)
 - `--shear-y-ref-mode {auto,fixed}` (default `auto`)
 - `--shear-y-ref` (used when mode is `fixed`)
 - `--xy-decimals` (default `3`)
@@ -216,10 +216,10 @@ You can provide measurements directly instead of a precomputed angle:
 
 ```bash
 # square: AC,BD,AD
-python3 skew_fix_ps.py --skew-from-square 141.821,141.421,100 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp
+python3 skew_fix_ps.py --skew-from-square 141.821,141.421,100 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp /path/to/file.gcode
 
 # rectangle: AC,BD,AD,AB
-python3 skew_fix_ps.py --skew-from-rectangle 180.5,179.5,80,120 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp
+python3 skew_fix_ps.py --skew-from-rectangle 180.5,179.5,80,120 --shear-y-ref-mode auto --recenter-to-bed --recenter-mode clamp /path/to/file.gcode
 ```
 
 ---
