@@ -164,14 +164,18 @@ The two geometry diagrams below show the actual vertex labels used in measuremen
 
 ### Square vertices and diagonals
 
-```mermaid
-graph LR
-  A((A)) --- B((B))
-  B --- C((C))
-  C --- D((D))
-  D --- A
-  A -. AC .- C
-  B -. BD .- D
+```text
+D o-------------------o C
+  | \               / |
+  |   \     BD    /   |
+  |     \       /     |
+  |       \   /       |
+  |   AC    X         |
+  |       /   \       |
+  |     /       \     |
+  |   /           \   |
+  | /               \ |
+A o-------------------o B
 ```
 
 Measurements for `--skew-from-square AC,BD,AD`:
@@ -181,14 +185,22 @@ Measurements for `--skew-from-square AC,BD,AD`:
 
 ### Rectangle vertices and diagonals
 
-```mermaid
-graph LR
-  A2((A)) --- B2((B))
-  B2 --- C2((C))
-  C2 --- D2((D))
-  D2 --- A2
-  A2 -. AC .- C2
-  B2 -. BD .- D2
+```text
+D o---------------------------o C
+  | \                       / |
+  |   \         BD        /   |
+  |     \               /     |
+  |       \           /       |
+  |         \       /         |
+  |   AC      \   /           |
+  |             X             |
+  |           /   \           |
+  |         /       \         |
+  |       /           \       |
+  |     /               \     |
+  |   /                   \   |
+  | /                       \ |
+A o---------------------------o B
 ```
 
 Measurements for `--skew-from-rectangle AC,BD,AD,AB`:
