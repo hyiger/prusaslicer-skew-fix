@@ -160,6 +160,42 @@ Always verify skew correction with:
 ## Diagrams
 
 All diagrams are in [`DIAGRAMS.md`](DIAGRAMS.md) under the **MEASURING_SKEW Diagrams** section.
+The two geometry diagrams below show the actual vertex labels used in measurements.
+
+### Square vertices and diagonals
+
+```mermaid
+graph LR
+  A((A)) --- B((B))
+  B --- C((C))
+  C --- D((D))
+  D --- A
+  A -. AC .- C
+  B -. BD .- D
+```
+
+Measurements for `--skew-from-square AC,BD,AD`:
+- `AC`: diagonal from `A` to `C`
+- `BD`: diagonal from `B` to `D`
+- `AD`: side from `A` to `D`
+
+### Rectangle vertices and diagonals
+
+```mermaid
+graph LR
+  A2((A)) --- B2((B))
+  B2 --- C2((C))
+  C2 --- D2((D))
+  D2 --- A2
+  A2 -. AC .- C2
+  B2 -. BD .- D2
+```
+
+Measurements for `--skew-from-rectangle AC,BD,AD,AB`:
+- `AC`: diagonal from `A` to `C`
+- `BD`: diagonal from `B` to `D`
+- `AD`: side from `A` to `D`
+- `AB`: side from `A` to `B`
 
 ---
 
