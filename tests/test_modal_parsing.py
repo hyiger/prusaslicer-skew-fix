@@ -17,3 +17,12 @@ def test_modal_parser_matches_exact_opcode_only(load_module):
     assert st.abs_e is True
     assert m._handle_modal_state_line(st, "G91") is True
     assert st.abs_xy is False
+
+
+def test_modal_parser_handles_whitespace_and_comment(load_module):
+    m = load_module
+    st = m.State(abs_xy=False, abs_e=False, ij_relative=True)
+    assert m._handle_modal_state_line(st, "G90   ; COMMENT")
+    assert st.abs_xy is True
+    assert m._handle_modal_state_line(st, "M82 ; COMMENT")
+    assert st.abs_e is True

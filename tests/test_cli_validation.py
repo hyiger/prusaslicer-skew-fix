@@ -145,3 +145,29 @@ def test_cli_rejects_negative_margin(tmp_path):
     r = _run(["--skew-deg", "0", "--margin", "-0.1", str(g)])
     assert r.returncode != 0
     assert "invalid non-negative float value" in (r.stderr + r.stdout)
+
+
+def test_cli_rejects_non_finite_shear_y_ref(tmp_path):
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nG1 X0 Y0\n", encoding="utf-8")
+
+    r_nan = _run(["--skew-deg", "0.1", "--shear-y-ref-mode", "fixed", "--shear-y-ref", "nan", str(g)])
+    assert r_nan.returncode != 0
+    assert "invalid finite float value" in (r_nan.stderr + r_nan.stdout)
+
+    r_inf = _run(["--skew-deg", "0.1", "--shear-y-ref-mode", "fixed", "--shear-y-ref", "inf", str(g)])
+    assert r_inf.returncode != 0
+    assert "invalid finite float value" in (r_inf.stderr + r_inf.stdout)
+
+
+def test_cli_rejects_non_finite_bed_args(tmp_path):
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nG1 X0 Y0\n", encoding="utf-8")
+
+    r_x = _run(["--skew-deg", "0", "--bed-x-min", "nan", str(g)])
+    assert r_x.returncode != 0
+    assert "invalid finite float value" in (r_x.stderr + r_x.stdout)
+
+    r_y = _run(["--skew-deg", "0", "--bed-y-max", "inf", str(g)])
+    assert r_y.returncode != 0
+    assert "invalid finite float value" in (r_y.stderr + r_y.stdout)

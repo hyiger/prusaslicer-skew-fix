@@ -111,3 +111,66 @@ def test_recenter_bounds_ignore_travel_arcs(tmp_path, load_module):
     assert maxx == 0.0
     assert miny == 0.0
     assert maxy == 0.0
+
+
+def test_relative_e_arc_with_non_positive_e_not_counted_in_bounds(tmp_path, load_module):
+    m = load_module
+    g = tmp_path / "arc_rel_e.gcode"
+    g.write_text(
+        "G90\n"
+        "M83\n"
+        "G0 X10 Y10\n"
+        "G2 X20 Y10 I5 J0 E0\n"      # non-extruding in M83
+        "G3 X10 Y10 I-5 J0 E-0.5\n"  # non-extruding in M83
+        "\n",
+        encoding="utf-8",
+    )
+    dx, dy, bounds = m.compute_translation_for_bounds(
+        str(g),
+        k=0.0,
+        y_ref=0.0,
+        bed_x_min=0.0, bed_x_max=250.0,
+        bed_y_min=0.0, bed_y_max=220.0,
+        margin=0.0,
+        recenter_mode="clamp",
+    )
+    assert dx == 0.0
+    assert dy == 0.0
+    assert bounds == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_margin_tiny_positive_tightens_fit_threshold(tmp_path, load_module):
+    m = load_module
+    g = tmp_path / "fit.gcode"
+    g.write_text(
+        "G90\n"
+        "M82\n"
+        "G1 X0 Y0 E1\n"
+        "G1 X10 Y10 E2\n"
+        "\n",
+        encoding="utf-8",
+    )
+
+    # Fits exactly at margin=0.
+    dx0, dy0, _ = m.compute_translation_for_bounds(
+        str(g),
+        k=0.0,
+        y_ref=0.0,
+        bed_x_min=0.0, bed_x_max=10.0,
+        bed_y_min=0.0, bed_y_max=10.0,
+        margin=0.0,
+        recenter_mode="clamp",
+    )
+    assert dx0 == 0.0 and dy0 == 0.0
+
+    # Tiny positive margin should make exact-edge fit impossible.
+    with pytest.raises(SystemExit, match="cannot fit within bed"):
+        m.compute_translation_for_bounds(
+            str(g),
+            k=0.0,
+            y_ref=0.0,
+            bed_x_min=0.0, bed_x_max=10.0,
+            bed_y_min=0.0, bed_y_max=10.0,
+            margin=1e-6,
+            recenter_mode="clamp",
+        )
