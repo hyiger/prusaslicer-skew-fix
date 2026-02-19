@@ -99,7 +99,7 @@ If PrusaSlicer outputs `.bgcode`:
 - Disable *Binary G-code* in PrusaSlicer
 - Re-slice
 
-The script will abort if binary G-code is detected to prevent file corruption.
+The script will abort if binary G-code is detected (Prusa magic `GCDE` at file start, or NUL bytes) to prevent file corruption.
 
 ---
 
@@ -187,7 +187,7 @@ Current command-line options:
 - `--bed-x-max` (default `250`)
 - `--bed-y-min` (default `0`)
 - `--bed-y-max` (default `220`)
-- `--margin` (default `0`)
+- `--margin` (default `0`, must be non-negative)
 
 ---
 

@@ -91,7 +91,8 @@ A small built-in epsilon prevents false “cannot fit” errors from rounding no
 
 ### Text G-code only
 
-Prusa binary G-code (`.bgcode`, magic `GCDE`) is rejected to prevent corrupting binary files.
+Prusa binary G-code (`.bgcode`) is rejected to prevent corrupting binary files.
+Detection uses the `GCDE` magic at file start (and a binary NUL-byte guard).
 
 ### Atomic rewrite
 
