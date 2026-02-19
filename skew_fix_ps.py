@@ -37,7 +37,7 @@ ARC_SEG_MM = 0.20
 ARC_MAX_DEG = 5.0
 EPS = 1e-9
 XY_DECIMALS = 3
-OTHER_DECIMALS = 3
+OTHER_DECIMALS = 5
 
 
 
@@ -244,6 +244,8 @@ def _parse_csv_floats(spec: str, count: int, name: str) -> Tuple[float, ...]:
         vals = tuple(float(p) for p in parts)
     except ValueError as exc:
         raise ValueError(f"{name} contains a non-numeric value.") from exc
+    if any(not math.isfinite(v) for v in vals):
+        raise ValueError(f"{name} contains a non-finite value.")
     return vals
 
 
@@ -254,6 +256,16 @@ def _non_negative_int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"invalid non-negative int value: '{text}'") from exc
     if value < 0:
         raise argparse.ArgumentTypeError(f"invalid non-negative int value: '{text}'")
+    return value
+
+
+def _finite_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid float value: '{text}'") from exc
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(f"invalid finite float value: '{text}'")
     return value
 
 
@@ -321,7 +333,8 @@ def _scan_inbed_bounds(
                 if extruding:
                     for (xi, yi) in pts:
                         if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                            upd(xi, yi)
+                            xb, yb = move_point_fn(xi, yi)
+                            upd(xb, yb)
                 st.x, st.y = pts[-1]
                 if "E" in words:
                     st.e = words["E"] if st.abs_e else (st.e + words["E"])
@@ -768,7 +781,7 @@ def rewrite(
 # CLI entry point used by PrusaSlicer post-processing.
 def main(argv: List[str]) -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skew-deg", type=float, default=None, help="XY skew angle in degrees (e.g. -0.15)")
+    ap.add_argument("--skew-deg", type=_finite_float, default=None, help="XY skew angle in degrees (e.g. -0.15)")
     ap.add_argument(
         "--skew-from-square",
         type=str,
@@ -787,7 +800,7 @@ def main(argv: List[str]) -> None:
     ap.add_argument("--shear-y-ref-mode", choices=["auto", "fixed"], default="auto",
                     help="Shear reference for x' = x + (y - y_ref)*tan(theta). "
                          "auto uses the in-bed EXTRUDING Y-center; fixed uses --shear-y-ref.")
-    ap.add_argument("--shear-y-ref", type=float, default=0.0,
+    ap.add_argument("--shear-y-ref", type=_finite_float, default=0.0,
                     help="Fixed y_ref for shear (only used when --shear-y-ref-mode=fixed).")
 
     ap.add_argument("--xy-decimals", type=_non_negative_int, default=3,
@@ -802,11 +815,11 @@ def main(argv: List[str]) -> None:
                     help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
     ap.add_argument("--recenter-mode", choices=["center", "clamp"], default="center",
                     help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.")
-    ap.add_argument("--bed-x-min", type=float, default=0.0)
-    ap.add_argument("--bed-x-max", type=float, default=250.0)
-    ap.add_argument("--bed-y-min", type=float, default=0.0)
-    ap.add_argument("--bed-y-max", type=float, default=220.0)
-    ap.add_argument("--margin", type=float, default=0.0, help="Safety margin (mm) from bed edges.")
+    ap.add_argument("--bed-x-min", type=_finite_float, default=0.0)
+    ap.add_argument("--bed-x-max", type=_finite_float, default=250.0)
+    ap.add_argument("--bed-y-min", type=_finite_float, default=0.0)
+    ap.add_argument("--bed-y-max", type=_finite_float, default=220.0)
+    ap.add_argument("--margin", type=_finite_float, default=0.0, help="Safety margin (mm) from bed edges.")
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
     src_count = int(a.skew_deg is not None) + int(a.skew_from_square is not None) + int(a.skew_from_rectangle is not None)
@@ -821,6 +834,10 @@ def main(argv: List[str]) -> None:
             skew_deg = skew_deg_from_rectangle(a.skew_from_rectangle)
     except ValueError as exc:
         ap.error(str(exc))
+    if a.bed_x_min > a.bed_x_max:
+        ap.error("--bed-x-min must be <= --bed-x-max.")
+    if a.bed_y_min > a.bed_y_max:
+        ap.error("--bed-y-min must be <= --bed-y-max.")
 
     # Apply formatting settings from CLI. These are used throughout rewrite() via globals.
     global XY_DECIMALS, OTHER_DECIMALS

@@ -38,6 +38,10 @@ def test_cli_rejects_bad_skew_from_square_shapes(tmp_path):
     assert r_non_numeric.returncode != 0
     assert "contains a non-numeric value" in (r_non_numeric.stderr + r_non_numeric.stdout)
 
+    r_non_finite = _run(["--skew-from-square", "nan,1,3", str(g)])
+    assert r_non_finite.returncode != 0
+    assert "contains a non-finite value" in (r_non_finite.stderr + r_non_finite.stdout)
+
     r_zero_ad = _run(["--skew-from-square", "1,2,0", str(g)])
     assert r_zero_ad.returncode != 0
     assert "AD must be non-zero" in (r_zero_ad.stderr + r_zero_ad.stdout)
@@ -54,6 +58,10 @@ def test_cli_rejects_bad_skew_from_rectangle_shapes(tmp_path):
     r_non_numeric = _run(["--skew-from-rectangle", "1,2,3,abc", str(g)])
     assert r_non_numeric.returncode != 0
     assert "contains a non-numeric value" in (r_non_numeric.stderr + r_non_numeric.stdout)
+
+    r_non_finite = _run(["--skew-from-rectangle", "1,2,3,inf", str(g)])
+    assert r_non_finite.returncode != 0
+    assert "contains a non-finite value" in (r_non_finite.stderr + r_non_finite.stdout)
 
     r_zero_ad = _run(["--skew-from-rectangle", "1,2,0,4", str(g)])
     assert r_zero_ad.returncode != 0
@@ -79,6 +87,17 @@ def test_cli_negative_decimal_flags_fail(tmp_path):
     r_other = _run(["--skew-deg", "0.1", "--other-decimals", "-2", str(g)])
     assert r_other.returncode != 0
     assert "invalid non-negative int value" in (r_other.stderr + r_other.stdout)
+
+
+def test_cli_rejects_non_finite_skew_deg(tmp_path):
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nG1 X0 Y0\n", encoding="utf-8")
+    r_nan = _run(["--skew-deg", "nan", str(g)])
+    assert r_nan.returncode != 0
+    assert "invalid finite float value" in (r_nan.stderr + r_nan.stdout)
+    r_inf = _run(["--skew-deg", "inf", str(g)])
+    assert r_inf.returncode != 0
+    assert "invalid finite float value" in (r_inf.stderr + r_inf.stdout)
 
 
 def test_cli_analyze_only_recenter_rejects_relative_xy(tmp_path):
@@ -107,3 +126,14 @@ def test_recenter_with_origin_point_is_not_treated_as_empty(tmp_path, load_modul
     assert dx == 5.0
     assert dy == 5.0
     assert bounds == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_cli_rejects_invalid_bed_ranges(tmp_path):
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nM82\nG1 X10 Y10 E1\n", encoding="utf-8")
+    rx = _run(["--skew-deg", "0", "--recenter-to-bed", "--bed-x-min", "250", "--bed-x-max", "0", str(g)])
+    assert rx.returncode != 0
+    assert "--bed-x-min must be <=" in (rx.stderr + rx.stdout)
+    ry = _run(["--skew-deg", "0", "--recenter-to-bed", "--bed-y-min", "220", "--bed-y-max", "0", str(g)])
+    assert ry.returncode != 0
+    assert "--bed-y-min must be <=" in (ry.stderr + ry.stdout)
