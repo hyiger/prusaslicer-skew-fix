@@ -84,7 +84,7 @@ def test_recenter_raises_when_model_cannot_fit(tmp_path, load_module):
             recenter_mode="clamp",
         )
 
-def test_recenter_bounds_include_travel_arcs(tmp_path, load_module):
+def test_recenter_bounds_ignore_travel_arcs(tmp_path, load_module):
     m = load_module
     g = tmp_path / "arc_travel.gcode"
     g.write_text("\n".join([
@@ -106,5 +106,8 @@ def test_recenter_bounds_include_travel_arcs(tmp_path, load_module):
         recenter_mode="clamp",
     )
     minx, maxx, miny, maxy = bounds
-    assert maxx > minx
-    assert maxy > miny
+    # Travel-only arc should not affect model/extruding bounds.
+    assert minx == 0.0
+    assert maxx == 0.0
+    assert miny == 0.0
+    assert maxy == 0.0

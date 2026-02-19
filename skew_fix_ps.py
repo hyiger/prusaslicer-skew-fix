@@ -247,6 +247,16 @@ def _parse_csv_floats(spec: str, count: int, name: str) -> Tuple[float, ...]:
     return vals
 
 
+def _non_negative_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid non-negative int value: '{text}'") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"invalid non-negative int value: '{text}'")
+    return value
+
+
 def skew_deg_from_square(spec: str) -> float:
     """Derive skew angle from square measurements: AC,BD,AD."""
     ac, bd, ad = _parse_csv_floats(spec, 3, "--skew-from-square")
@@ -305,11 +315,13 @@ def _scan_inbed_bounds(
 
             if ARC_RE.match(s):
                 words = parse_words(code)
+                extruding = _is_extruding_move(st, words)
                 cw = (s.split()[0].upper() == "G2")
                 pts = linearize_arc_points(st, words, cw=cw, seg_mm=ARC_SEG_MM, max_deg=ARC_MAX_DEG)
-                for (xi, yi) in pts:
-                    if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
-                        upd(xi, yi)
+                if extruding:
+                    for (xi, yi) in pts:
+                        if _in_bed(xi, yi, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
+                            upd(xi, yi)
                 st.x, st.y = pts[-1]
                 if "E" in words:
                     st.e = words["E"] if st.abs_e else (st.e + words["E"])
@@ -778,9 +790,9 @@ def main(argv: List[str]) -> None:
     ap.add_argument("--shear-y-ref", type=float, default=0.0,
                     help="Fixed y_ref for shear (only used when --shear-y-ref-mode=fixed).")
 
-    ap.add_argument("--xy-decimals", type=int, default=3,
+    ap.add_argument("--xy-decimals", type=_non_negative_int, default=3,
                     help="Decimal places to emit for X/Y values (default 3).")
-    ap.add_argument("--other-decimals", type=int, default=5,
+    ap.add_argument("--other-decimals", type=_non_negative_int, default=5,
                     help="Decimal places for E/F/Z/I/J/K/etc. (default 5).")
 
     ap.add_argument("--analyze-only", action="store_true",

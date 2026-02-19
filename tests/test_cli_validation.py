@@ -73,10 +73,12 @@ def test_cli_negative_decimal_flags_fail(tmp_path):
 
     r_xy = _run(["--skew-deg", "0.1", "--xy-decimals", "-1", str(g)])
     assert r_xy.returncode != 0
+    assert "invalid non-negative int value" in (r_xy.stderr + r_xy.stdout)
 
     g.write_text("G90\nG1 X10 Y10 E1\n", encoding="utf-8")
     r_other = _run(["--skew-deg", "0.1", "--other-decimals", "-2", str(g)])
     assert r_other.returncode != 0
+    assert "invalid non-negative int value" in (r_other.stderr + r_other.stdout)
 
 
 def test_cli_analyze_only_recenter_rejects_relative_xy(tmp_path):
