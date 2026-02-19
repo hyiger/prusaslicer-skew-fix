@@ -163,36 +163,6 @@ All diagrams are in [`DIAGRAMS.md`](DIAGRAMS.md) under the **MEASURING_SKEW Diag
 
 ---
 
-## Square and rectangle geometry diagrams
-
-### Square method (`--skew-from-square AC,BD,AD`)
-
-```mermaid
-flowchart TD
-  A["Square corners A, B, C, D"] --> AC["Measure diagonal AC"]
-  A --> BD["Measure diagonal BD"]
-  A --> AD["Measure side AD"]
-  AC --> IN1["Input: --skew-from-square AC,BD,AD"]
-  BD --> IN1
-  AD --> IN1
-```
-
-### Rectangle method (`--skew-from-rectangle AC,BD,AD,AB`)
-
-```mermaid
-flowchart TD
-  R["Rectangle corners A, B, C, D"] --> RAC["Measure diagonal AC"]
-  R --> RBD["Measure diagonal BD"]
-  R --> RAD["Measure side AD"]
-  R --> RAB["Measure side AB"]
-  RAC --> IN2["Input: --skew-from-rectangle AC,BD,AD,AB"]
-  RBD --> IN2
-  RAD --> IN2
-  RAB --> IN2
-```
-
----
-
 ## Summary
 
 If possible:
