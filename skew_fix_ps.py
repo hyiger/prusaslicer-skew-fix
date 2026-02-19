@@ -53,22 +53,26 @@ def _handle_modal_state_line(st: "State", up: str) -> bool:
     Returns True if the line was a recognized modal command that only changes
     state (and should generally be passed through unchanged), otherwise False.
     """
-    if up.startswith("G90.1"):
+    parts = up.split(None, 1)
+    if not parts:
+        return False
+    cmd = parts[0]
+    if cmd == "G90.1":
         st.ij_relative = False
         return True
-    if up.startswith("G91.1"):
+    if cmd == "G91.1":
         st.ij_relative = True
         return True
-    if up.startswith("G90"):
+    if cmd == "G90":
         st.abs_xy = True
         return True
-    if up.startswith("G91"):
+    if cmd == "G91":
         st.abs_xy = False
         return True
-    if up.startswith("M82"):
+    if cmd == "M82":
         st.abs_e = True
         return True
-    if up.startswith("M83"):
+    if cmd == "M83":
         st.abs_e = False
         return True
     return False
@@ -123,7 +127,8 @@ def replace_or_append(code: str, axis: str, val: float, *, xy_places: int, other
 def _assert_text_gcode(path: str) -> None:
     with open(path, "rb") as f:
         head = f.read(512)
-    if head.startswith(b"GCDE") or b"GCDE" in head[:64]:
+    # Binary Prusa G-code is identified by the GCDE magic at byte 0.
+    if head.startswith(b"GCDE"):
         raise SystemExit(
             "prusaslicer-skew-fix: ERROR: Binary G-code detected (magic 'GCDE').\n"
             "This script only supports text .gcode.\n"

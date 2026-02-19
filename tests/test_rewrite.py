@@ -104,13 +104,13 @@ def test_binary_guard_rejects_gcde_within_header_window(tmp_path, load_module):
     m = load_module
     p = tmp_path / "bad_header.gcode"
     p.write_bytes(b"ABCD1234GCDEmore-text-no-nul")
-    with pytest.raises(SystemExit, match="Binary G-code detected"):
-        m.rewrite(
-            str(p),
-            skew_deg=-0.15,
-            recenter=False,
-            bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
-            recenter_mode="center",
-            shear_y_ref_mode="fixed", shear_y_ref=0.0,
-            analyze_only=False
-        )
+    # GCDE not at byte 0 should not be treated as binary magic.
+    m.rewrite(
+        str(p),
+        skew_deg=-0.15,
+        recenter=False,
+        bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
+        recenter_mode="center",
+        shear_y_ref_mode="fixed", shear_y_ref=0.0,
+        analyze_only=False
+    )
