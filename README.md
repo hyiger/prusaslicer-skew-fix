@@ -307,3 +307,62 @@ The following behaviors are explicitly out of scope:
 
 - Backwards compatibility with older versions of this tool  
   Tests and behavior lock in current design decisions.
+
+---
+
+## Diagrams
+
+### 1) End-to-end processing flow
+
+```mermaid
+flowchart TD
+  A["PrusaSlicer exports text .gcode"] --> B["Run skew_fix_ps.py as post-process"]
+  B --> C["Validate input (text G-code only, reject binary)"]
+  C --> D["Parse moves and modal state"]
+  D --> E["Linearize G2/G3 arcs to G1 segments"]
+  E --> F["Compute shear reference y_ref (auto or fixed)"]
+  F --> G["Apply XY shear transform"]
+  G --> H{"--recenter-to-bed enabled?"}
+  H -- "No" --> I["Write rewritten G-code"]
+  H -- "Yes" --> J["Compute in-bed extruding bounds"]
+  J --> K["Compute shift (center or clamp)"]
+  K --> I["Write rewritten G-code"]
+```
+
+### 2) XY skew transform model
+
+```mermaid
+flowchart LR
+  A["Input point (x, y)"] --> B["k = tan(theta)"]
+  B --> C["x' = x + (y - y_ref) * k"]
+  A --> D["y' = y"]
+  C --> E["Output point (x', y')"]
+  D --> E
+```
+
+### 3) Recenter logic (`center` vs `clamp`)
+
+```mermaid
+flowchart TD
+  A["Skewed toolpath produced"] --> B["Extract in-bed extruding bounds"]
+  B --> C["Apply margin to printable bed limits"]
+  C --> D{"Fits with current position?"}
+  D -- "Yes" --> E["Shift dx=0, dy=0"]
+  D -- "No" --> F{"Recenter mode"}
+  F -- "center" --> G["Place bounds midpoint in allowable range midpoint"]
+  F -- "clamp" --> H["Apply minimum shift needed to fit bounds"]
+  G --> I["Apply XY translation"]
+  H --> I
+  E --> J["Emit final G-code"]
+  I --> J
+```
+
+### 4) Arc handling for geometric correctness
+
+```mermaid
+flowchart TD
+  A["Arc command (G2/G3)"] --> B["Linearize arc into short G1 segments"]
+  B --> C["Apply same shear transform to each segment endpoint"]
+  C --> D["Write transformed G1 sequence"]
+  D --> E["Result tracks sheared geometry correctly"]
+```
