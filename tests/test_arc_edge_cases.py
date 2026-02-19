@@ -39,3 +39,18 @@ def test_arc_followed_by_arc():
 def test_analyze_only_produces_no_rewrite():
     out = _run("G90\nG2 X50 Y0 I25 J0\n", analyze_only=True)
     assert "G2" in out
+
+def test_near_full_sweep_arc_linearizes_to_many_segments_and_keeps_following_move():
+    out = _run(
+        "G90\n"
+        "M82\n"
+        "G0 X1 Y0\n"
+        # Slightly positive end angle with CW forces a near-360 deg sweep.
+        "G2 X0.999999 Y0.001 I-1 J0 E1.0\n"
+        "G1 X2 Y0 E2.0\n"
+    )
+    lines = out.splitlines()
+    g1s = [ln for ln in lines if ln.startswith("G1")]
+    assert "G2" not in out and "G3" not in out
+    assert len(g1s) > 10
+    assert any("X2" in ln and "Y0" in ln for ln in g1s)
