@@ -36,6 +36,13 @@ This value can be passed directly to the skew correction script:
 --skew-deg -0.15
 ```
 
+Or you can pass measurements and let the script derive the angle:
+
+```bash
+--skew-from-square AC,BD,AD
+--skew-from-rectangle AC,BD,AD,AB
+```
+
 If you want confidence that you are correcting *geometry* rather than compensating for
 extrusion artifacts, Califlower v2 is strongly recommended.
 
@@ -71,6 +78,12 @@ Notes:
 
 This method is usable, but less robust than Califlower.
 
+Script input form for this method:
+
+```bash
+--skew-from-square d1,d2,L
+```
+
 ---
 
 ## Method 3: Long, thin rectangular part
@@ -92,6 +105,12 @@ Limitations:
 - Harder to convert directly into a skew angle
 
 This method is best used as a cross-check, not a primary measurement.
+
+If you have diagonal and side measurements for a rectangle:
+
+```bash
+--skew-from-rectangle d1,d2,AD,AB
+```
 
 ---
 
