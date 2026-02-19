@@ -235,6 +235,35 @@ def _choose_translation(lo: float, hi: float, mode: str) -> float:
         return 0.0
     return lo if abs(lo) < abs(hi) else hi
 
+
+def _parse_csv_floats(spec: str, count: int, name: str) -> Tuple[float, ...]:
+    parts = [p.strip() for p in spec.split(",")]
+    if len(parts) != count:
+        raise ValueError(f"{name} expects {count} comma-separated numbers.")
+    try:
+        vals = tuple(float(p) for p in parts)
+    except ValueError as exc:
+        raise ValueError(f"{name} contains a non-numeric value.") from exc
+    return vals
+
+
+def skew_deg_from_square(spec: str) -> float:
+    """Derive skew angle from square measurements: AC,BD,AD."""
+    ac, bd, ad = _parse_csv_floats(spec, 3, "--skew-from-square")
+    if ad == 0.0:
+        raise ValueError("--skew-from-square: AD must be non-zero.")
+    k = (ac - bd) / (2.0 * ad)
+    return math.degrees(math.atan(k))
+
+
+def skew_deg_from_rectangle(spec: str) -> float:
+    """Derive skew angle from rectangle measurements: AC,BD,AD,AB."""
+    ac, bd, ad, _ab = _parse_csv_floats(spec, 4, "--skew-from-rectangle")
+    if ad == 0.0:
+        raise ValueError("--skew-from-rectangle: AD must be non-zero.")
+    k = (ac - bd) / (2.0 * ad)
+    return math.degrees(math.atan(k))
+
 def _scan_inbed_bounds(
     path: str,
     *,
@@ -727,7 +756,21 @@ def rewrite(
 # CLI entry point used by PrusaSlicer post-processing.
 def main(argv: List[str]) -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skew-deg", type=float, required=True, help="XY skew angle in degrees (e.g. -0.15)")
+    ap.add_argument("--skew-deg", type=float, default=None, help="XY skew angle in degrees (e.g. -0.15)")
+    ap.add_argument(
+        "--skew-from-square",
+        type=str,
+        default=None,
+        metavar="AC,BD,AD",
+        help="Derive skew_deg from square diagonals and side length.",
+    )
+    ap.add_argument(
+        "--skew-from-rectangle",
+        type=str,
+        default=None,
+        metavar="AC,BD,AD,AB",
+        help="Derive skew_deg from rectangle diagonals and side lengths.",
+    )
 
     ap.add_argument("--shear-y-ref-mode", choices=["auto", "fixed"], default="auto",
                     help="Shear reference for x' = x + (y - y_ref)*tan(theta). "
@@ -754,6 +797,19 @@ def main(argv: List[str]) -> None:
     ap.add_argument("--margin", type=float, default=0.0, help="Safety margin (mm) from bed edges.")
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
+    src_count = int(a.skew_deg is not None) + int(a.skew_from_square is not None) + int(a.skew_from_rectangle is not None)
+    if src_count != 1:
+        ap.error("Specify exactly one of --skew-deg, --skew-from-square, or --skew-from-rectangle.")
+    try:
+        if a.skew_deg is not None:
+            skew_deg = a.skew_deg
+        elif a.skew_from_square is not None:
+            skew_deg = skew_deg_from_square(a.skew_from_square)
+        else:
+            skew_deg = skew_deg_from_rectangle(a.skew_from_rectangle)
+    except ValueError as exc:
+        ap.error(str(exc))
+
     # Apply formatting settings from CLI. These are used throughout rewrite() via globals.
     global XY_DECIMALS, OTHER_DECIMALS
     XY_DECIMALS = a.xy_decimals
@@ -763,7 +819,7 @@ def main(argv: List[str]) -> None:
 
     rewrite(
         path,
-        skew_deg=a.skew_deg,
+        skew_deg=skew_deg,
         shear_y_ref_mode=a.shear_y_ref_mode,
         shear_y_ref=a.shear_y_ref,
         recenter=a.recenter_to_bed,
