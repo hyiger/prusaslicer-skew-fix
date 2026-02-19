@@ -43,7 +43,8 @@ OTHER_DECIMALS = 5
 
 MOVE_RE = re.compile(r"^(G0|G1)\b", re.IGNORECASE)
 ARC_RE  = re.compile(r"^(G2|G3)\b", re.IGNORECASE)
-AXIS_RE = re.compile(r"([XYZEFRIJK])\s*(-?\d+(?:\.\d*)?|-?\.\d+)", re.IGNORECASE)
+NUM_RE = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+AXIS_RE = re.compile(rf"([XYZEFRIJK])\s*({NUM_RE})", re.IGNORECASE)
 
 
 def _handle_modal_state_line(st: "State", up: str) -> bool:
@@ -115,7 +116,7 @@ def replace_or_append(code: str, axis: str, val: float, *, xy_places: int, other
     """Replace an axis value in a G-code line, or append it if missing."""
     axis = axis.upper()
     tok = f"{axis}{fmt_axis(axis, val, xy_places, other_places)}"
-    pat = re.compile(rf"(?i)\b{axis}\s*(-?\d+(?:\.\d*)?|-?\.\d+)\b")
+    pat = re.compile(rf"(?i)\b{axis}\s*({NUM_RE})\b")
     return pat.sub(tok, code, 1) if pat.search(code) else (code + " " + tok)
 
 # Abort if the input file is binary (.bgcode / NUL bytes) to avoid corruption.
@@ -259,6 +260,13 @@ def _non_negative_int(text: str) -> int:
     return value
 
 
+def _non_negative_float(text: str) -> float:
+    value = _finite_float(text)
+    if value < 0.0:
+        raise argparse.ArgumentTypeError(f"invalid non-negative float value: '{text}'")
+    return value
+
+
 def _finite_float(text: str) -> float:
     try:
         value = float(text)
@@ -298,7 +306,7 @@ def _scan_inbed_bounds(
 ) -> Tuple[float, float, float, float, bool]:
     """Scan G-code and collect in-bed bounds used for recenter calculations.
 
-    - Arc points are always included if the points lie in-bed.
+    - Arc points are included only for extruding arcs and only if in-bed.
     - G0/G1 endpoints are included only for extruding moves that end in-bed.
     - move_point_fn maps eligible move endpoints before bounds update.
     """
@@ -819,7 +827,7 @@ def main(argv: List[str]) -> None:
     ap.add_argument("--bed-x-max", type=_finite_float, default=250.0)
     ap.add_argument("--bed-y-min", type=_finite_float, default=0.0)
     ap.add_argument("--bed-y-max", type=_finite_float, default=220.0)
-    ap.add_argument("--margin", type=_finite_float, default=0.0, help="Safety margin (mm) from bed edges.")
+    ap.add_argument("--margin", type=_non_negative_float, default=0.0, help="Safety margin (mm) from bed edges.")
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
     src_count = int(a.skew_deg is not None) + int(a.skew_from_square is not None) + int(a.skew_from_rectangle is not None)

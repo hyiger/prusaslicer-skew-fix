@@ -137,3 +137,11 @@ def test_cli_rejects_invalid_bed_ranges(tmp_path):
     ry = _run(["--skew-deg", "0", "--recenter-to-bed", "--bed-y-min", "220", "--bed-y-max", "0", str(g)])
     assert ry.returncode != 0
     assert "--bed-y-min must be <=" in (ry.stderr + ry.stdout)
+
+
+def test_cli_rejects_negative_margin(tmp_path):
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nM82\nG1 X10 Y10 E1\n", encoding="utf-8")
+    r = _run(["--skew-deg", "0", "--margin", "-0.1", str(g)])
+    assert r.returncode != 0
+    assert "invalid non-negative float value" in (r.stderr + r.stdout)
