@@ -22,6 +22,21 @@ def test_cli_analyze_only_does_not_modify(tmp_path):
     assert r.returncode == 0, r.stderr + r.stdout
     assert g.read_text(encoding="utf-8") == original
 
+def test_cli_analyze_only_with_recenter_reports_and_does_not_modify(tmp_path):
+    g = tmp_path / "t.gcode"
+    original = "G90\nM82\nG1 X10 Y10 E1.0\n"
+    g.write_text(original, encoding="utf-8")
+    r = _run([
+        "--skew-deg", "0.15",
+        "--analyze-only",
+        "--recenter-to-bed",
+        "--recenter-mode", "clamp",
+        str(g),
+    ])
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "recenter: enabled" in r.stdout
+    assert g.read_text(encoding="utf-8") == original
+
 def test_cli_empty_file_ok(tmp_path):
     g = tmp_path / "empty.gcode"
     g.write_text("", encoding="utf-8")

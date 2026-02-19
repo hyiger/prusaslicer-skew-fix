@@ -12,35 +12,6 @@ See [MEASURING_SKEW.md](MEASURING_SKEW.md) for recommended ways to measure XY sk
 
 ---
 
-
-## Deriving skew from a printed square or rectangle
-
-If you prefer to derive skew from simple caliper measurements (no angle math), you can use:
-
-```
---skew-from-square AC,BD,AD
---skew-from-rectangle AC,BD,AD,AB
-```
-
-Label your printed square/rectangle like this:
-
-```
-A -------- B
-|          |
-|          |
-D -------- C
-```
-
-- **AC**: diagonal A→C  
-- **BD**: diagonal B→D  
-- **AD**: Y-direction side length  
-- **AB**: X-direction side length (rectangles)
-
-The derived skew matches the same shear model as Marlin `M852`:
-
-	tan(theta) = (AC - BD) / (2 * AD)
-
-
 ## What problem this solves
 
 If your printer has measurable XY skew (axes not perfectly orthogonal),
@@ -84,6 +55,12 @@ y' = y
 **Default (`--shear-y-ref-mode auto`)**  
 `y_ref` is computed as the **center of extruding Y motion** (based on moves that actually print plastic). This makes the induced X displacement more symmetric and reduces the chance of pushing geometry toward a bed edge on large parts.
 
+**Legacy / Marlin-global-origin equivalent**  
+To reproduce older releases of this tool (and a global-origin shear), use:
+
+```bash
+--shear-y-ref-mode fixed --shear-y-ref 0
+```
 
 ### Worked numeric example
 
@@ -106,7 +83,7 @@ y' = 200
 ## Key features
 
 - Applies correct XY skew compensation
-- Optional arc linearization (`G2`/`G3` → `G1`)
+- Always-on arc linearization (`G2`/`G3` → `G1`) for geometric correctness
 - Safe recentering to prevent bed clipping
 - Bounds computed from **actual printed geometry only**
 - Purge / wipe / parking moves ignored by design
@@ -130,14 +107,16 @@ The script will abort if binary G-code is detected to prevent file corruption.
 
 A shear transform does **not** preserve circles — circles become ellipses.
 
-If your G-code contains `G2` or `G3`, you **must** enable arc linearization (convert arcs into short `G1` segments):
+If your G-code contains `G2` or `G3`, this tool converts arcs into short `G1` segments before applying skew:
 
 ```
 Arc linearization is ON by default; arc linearization is always enabled
 ```
 
-Defaults:
-- `- `
+Fixed parameters:
+- Segment length: `0.20 mm`
+- Max angle per segment: `5.0°`
+
 This avoids preview artifacts and ensures printed geometry matches the math.
 
 ---
@@ -184,11 +163,28 @@ This avoids confusing shifts caused by startup or maintenance macros.
 
 ## Floating-point tolerance
 
-```
---eps 0.01
-```
+The recenter fit check uses a small built-in epsilon to avoid false “cannot fit” errors from floating-point rounding.
 
-This prevents false “cannot fit” errors caused by floating-point rounding.
+---
+
+## CLI options
+
+Current command-line options:
+
+- `gcode` (positional): path to the generated text `.gcode` file
+- `--skew-deg` (required): XY skew angle in degrees
+- `--shear-y-ref-mode {auto,fixed}` (default `auto`)
+- `--shear-y-ref` (used when mode is `fixed`)
+- `--xy-decimals` (default `3`)
+- `--other-decimals` (default `5`)
+- `--analyze-only` (report only, no file rewrite)
+- `--recenter-to-bed`
+- `--recenter-mode {center,clamp}` (default `center`)
+- `--bed-x-min` (default `0`)
+- `--bed-x-max` (default `250`)
+- `--bed-y-min` (default `0`)
+- `--bed-y-max` (default `220`)
+- `--margin` (default `0`)
 
 ---
 
@@ -260,11 +256,14 @@ The output includes:
 Sample output (abridged):
 
 ```text
-Input bounds (extruding XY):   X[...,...]  Y[...,...]
-Skewed bounds (before shift):  X[...,...]  Y[...,...]
-Max |ΔX|: ...
-Recenter shift applied:        ΔX=...  ΔY=...
-Final bounds (in bed):         X[...,...]  Y[...,...]
+prusaslicer-skew-fix: analyze-only
+  skew_deg: ...
+  shear_y_ref: ...
+  recenter: enabled|disabled ...
+  in-bed extruding skewed bounds: X[...,...] Y[...,...]   shift dx=... dy=...
+  all-move bounds (pre):  X[...,...] Y[...,...]
+  all-move bounds (post): X[...,...] Y[...,...]
+  max |ΔX| (all moves): ... mm
 ```
 
 

@@ -84,3 +84,18 @@ def test_binary_guard_rejects_bgcode(tmp_path, load_module):
             shear_y_ref_mode="fixed", shear_y_ref=0.0,
             analyze_only=False
         )
+
+def test_binary_guard_rejects_nul_binary(tmp_path, load_module):
+    m = load_module
+    p = tmp_path / "nul.gcode"
+    p.write_bytes(b"G1 X0 Y0\n\x00BINARY")
+    with pytest.raises(SystemExit, match="NUL bytes detected"):
+        m.rewrite(
+            str(p),
+            skew_deg=-0.15,
+            recenter=False,
+            bed_x_min=0.0, bed_x_max=250.0, bed_y_min=0.0, bed_y_max=220.0, margin=0.0,
+            recenter_mode="center",
+            shear_y_ref_mode="fixed", shear_y_ref=0.0,
+            analyze_only=False
+        )

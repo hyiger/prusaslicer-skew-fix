@@ -39,8 +39,8 @@ Therefore:
 - Then apply skew to the resulting points
 
 Segmentation is controlled by:
-- **Chord length** (`--arc-segment-mm`): limits how long each segment is
-- **Angular step** (`--arc-max-deg`): limits how much angle each segment spans
+- **Chord length** (`0.20 mm`): limits how long each segment is
+- **Angular step** (`5.0°`): limits how much angle each segment spans
 
 This bounds geometric error while keeping file size reasonable.
 
@@ -83,7 +83,7 @@ If the interval is valid, we pick the translation using:
 
 ### Floating-point tolerance
 
-A small epsilon (`--eps`, default 0.01 mm) prevents false “cannot fit” errors from rounding noise.
+A small built-in epsilon prevents false “cannot fit” errors from rounding noise.
 
 ---
 
@@ -105,7 +105,7 @@ of partial files if something fails mid-write.
 - Absolute XY (`G90`) is expected (standard PrusaSlicer output)
 - Z is not modified
 - Skew angles are assumed small (typical printer tolerances)
-- If arcs exist and are not linearized, geometry will be wrong (circles become ellipses)
+- Arcs are always linearized before skew; without linearization, geometry would be wrong (circles become ellipses)
 
 ---
 
@@ -114,7 +114,7 @@ of partial files if something fails mid-write.
 For most users:
 
 ```
---linearize-arcs --recenter-to-bed --recenter-mode clamp
+--recenter-to-bed --recenter-mode clamp
 ```
 
 This produces correct geometry and avoids clipping without being affected by purge/wipe macros.
