@@ -157,53 +157,6 @@ Always verify skew correction with:
 
 ---
 
-## SVD-based estimation (advanced)
-
-If you capture many nominal-vs-measured XY point pairs, you can estimate distortion with a best-fit linear transform and SVD.
-This is useful as an analysis method, but it is not a required workflow for this tool.
-
-### SVD workflow overview
-
-```mermaid
-flowchart TD
-  A["Collect matched XY points (nominal, measured)"] --> B["Remove translation by centering both point sets"]
-  B --> C["Build cross-covariance matrix H"]
-  C --> D["Compute SVD: H = U * Σ * V^T"]
-  D --> E["Recover best-fit rotation R = V * U^T"]
-  E --> F["Solve remaining linear residual for skew/shear terms"]
-  F --> G["Convert shear term to skew angle theta = atan(k)"]
-```
-
-### Linear model decomposition
-
-```mermaid
-flowchart LR
-  A["Measured transform A (2x2)"] --> B["Polar/SVD split"]
-  B --> C["Rotation-like part R"]
-  B --> D["Symmetric/stretch part S"]
-  C --> E["Separate pure rotation from axis non-orthogonality"]
-  D --> E
-  E --> F["Identify X-from-Y shear term k"]
-```
-
-### Mapping SVD result to this script
-
-```mermaid
-flowchart TD
-  A["Estimated shear coefficient k"] --> B["Compute theta = atan(k) in degrees"]
-  B --> C["Use --skew-deg theta"]
-  C --> D["Run --analyze-only first"]
-  D --> E{"Bounds and max |ΔX| look sane?"}
-  E -- "Yes" --> F["Apply rewrite in post-processing"]
-  E -- "No" --> G["Re-check measurements/outliers and refit"]
-```
-
-Notes:
-- This repository’s CLI accepts a skew angle (or diagonal-based measurements), not raw SVD matrices.
-- For best stability, reject obvious outliers before fitting.
-
----
-
 ## Diagrams
 
 All diagrams are in [`DIAGRAMS.md`](DIAGRAMS.md) under the **MEASURING_SKEW Diagrams** section.
