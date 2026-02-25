@@ -31,7 +31,7 @@ skew_fix_ps.py [options] gcode
 - Skew source (choose exactly one):
 - `--skew-deg SKEW_DEG`
 - `--skew-from-square AC,BD,AD`
-- `--skew-from-rectangle AC,BD,AD,AB` (`AB` accepted for compatibility; current formula uses `AC`, `BD`, `AD`)
+- `--skew-from-rectangle AC,BD,AD,AB`
 - `--shear-y-ref-mode {auto,fixed}` (default: `auto`)
 - `--shear-y-ref SHEAR_Y_REF` (used when mode is `fixed`)
 - `--xy-decimals XY_DECIMALS` (default: `3`)

@@ -139,6 +139,29 @@ def test_relative_e_arc_with_non_positive_e_not_counted_in_bounds(tmp_path, load
     assert bounds == (0.0, 0.0, 0.0, 0.0)
 
 
+def test_inbed_extruding_bounds_original_handles_relative_xy(tmp_path, load_module):
+    m = load_module
+    g = tmp_path / "rel.gcode"
+    # Use M83 (relative E) so E0.5 > 0 is an extruding move regardless of mode.
+    g.write_text(
+        "G90\nM83\n"
+        "G1 X50 Y50 E1.0\n"   # absolute XY, relative E > 0: in-bed, extruding
+        "G91\n"
+        "G1 X10 Y10 E0.5\n"   # relative XY (+10,+10) → abs (60,60), relative E > 0: extruding
+        "G90\n",
+        encoding="utf-8",
+    )
+    minx, maxx, miny, maxy = m.compute_inbed_extruding_bounds_original(
+        str(g),
+        bed_x_min=0.0, bed_x_max=250.0,
+        bed_y_min=0.0, bed_y_max=220.0,
+    )
+    assert minx == pytest.approx(50.0)
+    assert maxx == pytest.approx(60.0)
+    assert miny == pytest.approx(50.0)
+    assert maxy == pytest.approx(60.0)
+
+
 def test_margin_tiny_positive_tightens_fit_threshold(tmp_path, load_module):
     m = load_module
     g = tmp_path / "fit.gcode"
