@@ -16,14 +16,25 @@ def test_skew_deg_from_square_zero():
     assert abs(deg) < 1e-9
 
 def test_skew_deg_from_square_known():
-    # AD=100, tan(theta)=0.002 -> AC-BD=0.4
-    deg = skew_deg_from_square("141.821,141.421,100")
-    assert abs(deg - math.degrees(math.atan(0.002))) < 1e-9
+    # Use exact geometry: for side L and skew k,
+    # AC = L*sqrt((1+k)^2+1), BD = L*sqrt((k-1)^2+1)
+    k = 0.002
+    L = 100.0
+    ac = L * math.sqrt((1 + k) ** 2 + 1)
+    bd = L * math.sqrt((k - 1) ** 2 + 1)
+    deg = skew_deg_from_square(f"{ac},{bd},{L}")
+    assert abs(deg - math.degrees(math.atan(k))) < 1e-9
 
 def test_skew_deg_from_rectangle_known():
-    # AD=80, tan(theta)=0.00625 -> AC-BD=1.0
-    deg = skew_deg_from_rectangle("180.5,179.5,80,120")
-    assert abs(deg - math.degrees(math.atan(0.00625))) < 1e-9
+    # Use exact geometry: for width W (AB), height H (AD) and skew k,
+    # AC = sqrt((W+kH)^2+H^2), BD = sqrt((kH-W)^2+H^2)
+    k = 0.00625
+    W = 120.0  # AB
+    H = 80.0   # AD
+    ac = math.sqrt((W + k * H) ** 2 + H ** 2)
+    bd = math.sqrt((k * H - W) ** 2 + H ** 2)
+    deg = skew_deg_from_rectangle(f"{ac},{bd},{H},{W}")
+    assert abs(deg - math.degrees(math.atan(k))) < 1e-9
 
 def test_cli_rejects_missing_skew(tmp_path):
     g = tmp_path / "t.gcode"

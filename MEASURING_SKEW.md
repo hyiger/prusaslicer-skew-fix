@@ -22,8 +22,8 @@ Typical workflow:
 3. Use the Califlower analysis to compute the XY skew
 
 Califlower reports skew either:
-- directly as an **angle** (preferred), or
-- indirectly via diagonal differences that can be converted to an angle
+- directly as an **angle** (preferred, use `--skew-deg`), or
+- as diagonal measurements that can be passed to `--skew-from-square` or `--skew-from-rectangle`
 
 Example result:
 ```
@@ -43,7 +43,7 @@ Or you can pass measurements and let the script derive the angle:
 --skew-from-rectangle AC,BD,AD,AB
 ```
 
-`--skew-from-rectangle` accepts `AB` for input compatibility, but the current formula uses `AC`, `BD`, and `AD`.
+`--skew-from-rectangle` uses all four measurements: `AC`, `BD`, `AD`, and `AB`.
 
 If you want confidence that you are correcting *geometry* rather than compensating for
 extrusion artifacts, Califlower v2 is strongly recommended.
@@ -61,20 +61,17 @@ Procedure:
 
 For a perfect square, both diagonals should be equal. A difference indicates XY skew.
 
-Let:
-- `d1` = diagonal AC
-- `d2` = diagonal BD
-- `L` = nominal side length
+Using the vertex labels from the diagram below (A = bottom-left, B = bottom-right, C = top-right, D = top-left):
 
-For small skew angles, the skew can be approximated by:
+- `AC` = diagonal from A to C (longer when skewed one way)
+- `BD` = diagonal from B to D (shorter when skewed one way)
+- `AD` = side from A to D (the measured side length)
 
-**Approximate skew angle (small-angle assumption):**
+The exact skew factor is:
 
-`theta ≈ arctan((d1 - d2) / (2 * L))`
-
+`theta = arctan((AC² - BD²) / (4 · AD²))`
 
 Notes:
-- This assumes small angles (true for most printers)
 - Accuracy depends heavily on caliper precision
 - Corner rounding and elephant’s foot can distort results
 
@@ -83,35 +80,41 @@ This method is usable, but less robust than Califlower.
 Script input form for this method:
 
 ```bash
---skew-from-square d1,d2,L
+--skew-from-square AC,BD,AD
 ```
 
 ---
 
-## Method 3: Long, thin rectangular part
+## Method 3: Rectangle with diagonal measurement
 
-Another generic approach is to print a **long, thin rectangle**
-(e.g. 200×20 mm), often rotated ~45° on the bed.
+A rectangle works the same way as the square method and can be useful when a
+non-square print is more convenient or already available.
 
 Procedure:
-1. Print the rectangle
-2. Measure deviation from expected dimensions
-3. Infer skew from accumulated error along the long axis
+1. Print a rectangle (larger is better; at least 100 mm on the long axis)
+2. Measure both diagonals and both sides with calipers
 
-Why it works:
-- Skew error accumulates with distance
+Using the vertex labels from the diagram below (A = bottom-left, B = bottom-right,
+C = top-right, D = top-left):
+
+- `AC` = diagonal from A to C
+- `BD` = diagonal from B to D
+- `AD` = side from A to D (height)
+- `AB` = side from A to B (width)
+
+The exact skew factor is:
+
+`theta = arctan((AC² - BD²) / (4 · AB · AD))`
 
 Limitations:
-- Requires careful measurement
-- Influenced by slicer compensation and extrusion tuning
-- Harder to convert directly into a skew angle
+- Accuracy depends heavily on caliper precision
+- Corner rounding and elephant's foot can distort results
+- Larger and more square-like rectangles give better signal-to-noise
 
-This method is best used as a cross-check, not a primary measurement.
-
-If you have diagonal and side measurements for a rectangle:
+Script input form for this method:
 
 ```bash
---skew-from-rectangle d1,d2,AD,AB
+--skew-from-rectangle AC,BD,AD,AB
 ```
 
 ---
@@ -213,9 +216,10 @@ Measurements for `--skew-from-rectangle AC,BD,AD,AB`:
 
 ## Summary
 
-If possible:
-1. Use **Califlower v2**
-2. Fall back to diagonal square measurements
-3. Use generic methods only as rough estimates
+In order of preference:
+1. **Califlower v2** — most accurate; reports angle directly
+2. **Square diagonal measurement** — good general-purpose fallback
+3. **Rectangle diagonal measurement** — same approach as square, use when a rectangle is more convenient
+4. **Mechanical measurement** — diagnostic only; does not reflect printed geometry
 
 Accurate skew measurement is the foundation of reliable skew correction.

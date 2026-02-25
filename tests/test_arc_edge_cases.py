@@ -40,6 +40,21 @@ def test_analyze_only_produces_no_rewrite():
     out = _run("G90\nG2 X50 Y0 I25 J0\n", analyze_only=True)
     assert "G2" in out
 
+def test_full_circle_arc_linearizes_to_many_segments():
+    # G2 with no X/Y and a nonzero I/J is a full circle (start == end).
+    # Previously this collapsed to a single degenerate point.
+    out = _run(
+        "G90\n"
+        "M82\n"
+        "G0 X10 Y0\n"
+        "G2 I-10 J0 E1.0\n"  # full CW circle of radius 10, center at (0,0)
+    )
+    lines = out.splitlines()
+    g1s = [ln for ln in lines if ln.startswith("G1") and "E" in ln]
+    assert "G2" not in out and "G3" not in out
+    assert len(g1s) > 10
+
+
 def test_near_full_sweep_arc_linearizes_to_many_segments_and_keeps_following_move():
     out = _run(
         "G90\n"

@@ -67,12 +67,17 @@ def test_cli_rejects_bad_skew_from_rectangle_shapes(tmp_path):
     assert r_zero_ad.returncode != 0
     assert "AD must be non-zero" in (r_zero_ad.stderr + r_zero_ad.stdout)
 
+    r_zero_ab = _run(["--skew-from-rectangle", "1,2,3,0", str(g)])
+    assert r_zero_ab.returncode != 0
+    assert "AB must be non-zero" in (r_zero_ab.stderr + r_zero_ab.stdout)
 
-def test_skew_from_rectangle_ab_is_currently_ignored(load_module):
+
+def test_skew_from_rectangle_ab_affects_result(load_module):
     m = load_module
+    # Different AB values must produce different results now that AB is used in the formula.
     a = m.skew_deg_from_rectangle("180.5,179.5,80,120")
     b = m.skew_deg_from_rectangle("180.5,179.5,80,999")
-    assert a == b
+    assert a != b
 
 
 def test_cli_negative_decimal_flags_fail(tmp_path):

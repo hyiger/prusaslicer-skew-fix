@@ -105,7 +105,7 @@ of partial files if something fails mid-write.
 
 - Absolute XY (`G90`) is expected (standard PrusaSlicer output)
 - Z is not modified
-- Skew angles are assumed small (typical printer tolerances)
+- The shear transform and measurement formulas are exact for any angle; in practice skew is small (typical printer tolerances)
 - Arcs are always linearized before skew; without linearization, geometry would be wrong (circles become ellipses)
 
 ---

@@ -202,6 +202,10 @@ def linearize_arc_points(st: State, words: Dict[str, float], cw: bool,
     a1 = math.atan2(y1 - cy, x1 - cx)
 
     da = _sweep(a0, a1, cw=cw)
+    # A full-circle arc has start == end, so _sweep returns 0. Detect this by
+    # checking for nonzero radius with a near-zero sweep and treat as ±2π.
+    if abs(da) < EPS and r > EPS:
+        da = -2 * math.pi if cw else 2 * math.pi
     arc_len = abs(da) * r if r > 0 else math.hypot(x1 - x0, y1 - y0)
 
     max_rad = math.radians(max_deg) if max_deg > 0 else abs(da)
@@ -283,20 +287,30 @@ def _finite_float(text: str) -> float:
 
 
 def skew_deg_from_square(spec: str) -> float:
-    """Derive skew angle from square measurements: AC,BD,AD."""
+    """Derive skew angle from square measurements: AC,BD,AD.
+
+    Exact formula (no small-angle approximation):
+        k = (AC² - BD²) / (4 · AD²)
+    """
     ac, bd, ad = _parse_csv_floats(spec, 3, "--skew-from-square")
     if ad == 0.0:
         raise ValueError("--skew-from-square: AD must be non-zero.")
-    k = (ac - bd) / (2.0 * ad)
+    k = (ac * ac - bd * bd) / (4.0 * ad * ad)
     return math.degrees(math.atan(k))
 
 
 def skew_deg_from_rectangle(spec: str) -> float:
-    """Derive skew angle from rectangle measurements: AC,BD,AD,AB."""
-    ac, bd, ad, _ab = _parse_csv_floats(spec, 4, "--skew-from-rectangle")
+    """Derive skew angle from rectangle measurements: AC,BD,AD,AB.
+
+    Exact formula (no small-angle approximation):
+        k = (AC² - BD²) / (4 · AB · AD)
+    """
+    ac, bd, ad, ab = _parse_csv_floats(spec, 4, "--skew-from-rectangle")
     if ad == 0.0:
         raise ValueError("--skew-from-rectangle: AD must be non-zero.")
-    k = (ac - bd) / (2.0 * ad)
+    if ab == 0.0:
+        raise ValueError("--skew-from-rectangle: AB must be non-zero.")
+    k = (ac * ac - bd * bd) / (4.0 * ab * ad)
     return math.degrees(math.atan(k))
 
 def _scan_inbed_bounds(
@@ -357,8 +371,12 @@ def _scan_inbed_bounds(
 
             if MOVE_RE.match(s):
                 words = parse_words(code)
-                x1 = words.get("X", st.x)
-                y1 = words.get("Y", st.y)
+                if st.abs_xy:
+                    x1 = words.get("X", st.x)
+                    y1 = words.get("Y", st.y)
+                else:
+                    x1 = st.x + words.get("X", 0.0)
+                    y1 = st.y + words.get("Y", 0.0)
                 if _is_extruding_move(st, words) and _in_bed(x1, y1, bed_x_min, bed_x_max, bed_y_min, bed_y_max):
                     xb, yb = move_point_fn(x1, y1)
                     upd(xb, yb)
