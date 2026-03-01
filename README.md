@@ -115,11 +115,10 @@ Reports include pre/post bounds, max `|ΔX|`, and recenter shift (when enabled).
 
 ## Safety and File Handling
 
-- Text G-code only.
-- Binary files are rejected (Prusa `.bgcode` magic `GCDE` or detected NUL bytes).
+- Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported.
+- `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact — suitable for direct upload to PrusaConnect.
+- Unrecognised binary files (NUL bytes, non-`GCDE` magic) are rejected with an error.
 - Rewrite is done via temp file and atomic replace.
-
-If PrusaSlicer outputs `.bgcode`, disable Binary G-code and re-slice.
 
 ## Diagrams
 
