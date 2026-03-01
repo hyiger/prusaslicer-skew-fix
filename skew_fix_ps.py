@@ -2,7 +2,8 @@
 """
 prusaslicer-skew-fix
 
-PrusaSlicer post-processing hook that applies XY skew correction to generated **text** G-code.
+PrusaSlicer post-processing hook that applies XY skew correction to G-code.
+Supports both plain text .gcode and Prusa binary .bgcode files.
 
 Skew model (shear):
     x' = x + y * tan(theta)
@@ -16,9 +17,13 @@ Key features:
   - Only endpoints that are already IN-BED in the original G-code are included
   - Purge/wipe/parking moves outside the bed do not affect recentering
 
-Binary G-code guard:
-- If the input file is Prusa Binary G-code (.bgcode; magic 'GCDE') or appears binary,
-  the script aborts to avoid corrupting it.
+Binary G-code (.bgcode) support:
+- Detected by the 'GCDE' magic header.
+- G-code text is decoded from GCode blocks, corrected, then re-encoded in place.
+- All non-GCode blocks (thumbnails, slicer/printer/print metadata) are preserved
+  unchanged so the corrected file can be uploaded to PrusaConnect or printed directly.
+- Supports COMP_NONE and COMP_DEFLATE payloads; ENC_RAW (UTF-8) encoding only.
+  Heatshrink and MeatPack variants are rejected with a clear error.
 """
 
 from __future__ import annotations
@@ -27,8 +32,10 @@ import argparse
 import math
 import os
 import re
+import struct
 import sys
 import tempfile
+import zlib
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -123,23 +130,26 @@ def replace_or_append(code: str, axis: str, val: float, *, xy_places: int, other
     pat = re.compile(rf"(?i)\b{axis}\s*({NUM_RE})\b")
     return pat.sub(tok, code, 1) if pat.search(code) else (code + " " + tok)
 
-# Abort if the input file is binary (.bgcode / NUL bytes) to avoid corruption.
+# Abort if the input file is binary (NUL bytes) and is NOT a recognised bgcode.
+# Called only after _is_bgcode() has returned False, so GCDE files never reach here.
 def _assert_text_gcode(path: str) -> None:
     with open(path, "rb") as f:
         head = f.read(512)
-    # Binary Prusa G-code is identified by the GCDE magic at byte 0.
-    if head.startswith(b"GCDE"):
-        raise SystemExit(
-            "prusaslicer-skew-fix: ERROR: Binary G-code detected (magic 'GCDE').\n"
-            "This script only supports text .gcode.\n"
-            "Fix: Disable 'Binary G-code' output in PrusaSlicer, then re-slice."
-        )
     if b"\x00" in head:
         raise SystemExit(
             "prusaslicer-skew-fix: ERROR: File appears to be binary (NUL bytes detected).\n"
-            "This script only supports text .gcode.\n"
-            "Fix: Disable 'Binary G-code' output in PrusaSlicer, then re-slice."
+            "Supported formats: text .gcode and Prusa binary .bgcode (magic 'GCDE').\n"
+            "If using PrusaSlicer with binary output, verify the file is a valid .bgcode."
         )
+
+
+def _is_bgcode(path: str) -> bool:
+    """Return True if the file is a Prusa binary G-code file (magic 'GCDE')."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"GCDE"
+    except OSError:
+        return False
 
 # Apply XY shear transform: x' = x + y*tan(theta), y' = y (Marlin M852-compatible).
 def apply_skew_abs(x: float, y: float, k: float, y_ref: float = 0.0) -> Tuple[float, float]:
@@ -543,6 +553,224 @@ def analyze_gcode(path: str, k: float, y_ref: float,bed_x_min: float, bed_x_max:
     return lines
 
 
+def _bgcode_split(data: bytes) -> Tuple[bytes, List[bytes], str]:
+    """Parse a .bgcode file into its components.
+
+    Returns:
+        file_hdr:     the 10-byte file prefix (magic + version + checksum_type).
+        other_blocks: raw bytes of every non-GCode block, in original order.
+                      These are preserved verbatim on reassembly (thumbnails,
+                      slicer/printer/print metadata, etc.).
+        gcode_text:   concatenated ASCII G-code from all GCode blocks.
+
+    Raises ValueError for invalid/truncated/unsupported files.
+    """
+    MAGIC = b"GCDE"
+    BLK_GCODE = 1
+    BLK_THUMBNAIL = 5   # thumbnail params are 6 bytes; all other blocks use 2
+    COMP_NONE = 0
+    COMP_DEFLATE = 1
+    ENC_RAW = 0         # plain UTF-8; same numeric value as ENC_INI for metadata
+
+    if len(data) < 10:
+        raise ValueError(f"Data too short ({len(data)} bytes) to be a bgcode file")
+    if data[:4] != MAGIC:
+        raise ValueError(f"Not a bgcode file: expected magic {MAGIC!r}, got {data[:4]!r}")
+
+    # File header: magic(4) + version(uint32) + checksum_type(uint16) = 10 bytes
+    file_hdr = data[:10]
+    pos = 10
+    gcode_parts: List[str] = []
+    other_raws: List[bytes] = []
+
+    while pos < len(data):
+        block_start = pos
+
+        if pos + 8 > len(data):
+            raise ValueError(f"Truncated block header at offset {pos}")
+
+        btype, comp = struct.unpack_from("<HH", data, pos)
+        uncomp_size, = struct.unpack_from("<I", data, pos + 4)
+
+        if comp == COMP_NONE:
+            comp_size = uncomp_size
+            hdr_len = 8
+        elif comp in (COMP_DEFLATE, 2, 3):  # DEFLATE or either Heatshrink variant
+            if pos + 12 > len(data):
+                raise ValueError(f"Truncated block header at offset {pos}")
+            comp_size, = struct.unpack_from("<I", data, pos + 8)
+            hdr_len = 12
+        else:
+            raise ValueError(f"Unknown compression type {comp} at offset {pos}")
+
+        params_len = 6 if btype == BLK_THUMBNAIL else 2
+        params_start = pos + hdr_len
+        payload_start = params_start + params_len
+        payload_end = payload_start + comp_size
+
+        if payload_end + 4 > len(data):
+            raise ValueError(
+                f"Truncated block payload at offset {pos}: "
+                f"need {payload_end + 4 - len(data)} more bytes"
+            )
+
+        # CRC32 covers: block header bytes + params bytes + payload bytes
+        stored_crc, = struct.unpack_from("<I", data, payload_end)
+        computed_crc = zlib.crc32(data[pos:payload_end]) & 0xFFFFFFFF
+        if computed_crc != stored_crc:
+            raise ValueError(
+                f"CRC32 mismatch in block type {btype} at offset {pos}: "
+                f"computed {computed_crc:#010x}, stored {stored_crc:#010x}"
+            )
+
+        block_end = payload_end + 4
+
+        if btype == BLK_GCODE:
+            enc, = struct.unpack_from("<H", data, params_start)
+            payload = data[payload_start:payload_end]
+            if comp == COMP_NONE:
+                raw_payload = payload
+            elif comp == COMP_DEFLATE:
+                try:
+                    raw_payload = zlib.decompress(payload)
+                except zlib.error as e:
+                    raise ValueError(
+                        f"DEFLATE decompression failed at offset {pos}: {e}"
+                    ) from e
+            else:
+                raise ValueError(
+                    f"Unsupported GCode block compression {comp} at offset {pos} "
+                    f"(Heatshrink decoding requires a third-party library)"
+                )
+            if enc != ENC_RAW:
+                raise ValueError(
+                    f"Unsupported GCode block encoding {enc} at offset {pos} "
+                    f"(MeatPack decoding is not supported)"
+                )
+            gcode_parts.append(raw_payload.decode("utf-8"))
+        else:
+            # Preserve non-GCode blocks verbatim for reassembly.
+            other_raws.append(data[block_start:block_end])
+
+        pos = block_end
+
+    if not gcode_parts:
+        raise ValueError("No GCode blocks found in bgcode data")
+
+    return file_hdr, other_raws, "".join(gcode_parts)
+
+
+def _bgcode_reassemble(file_hdr: bytes, other_blocks: List[bytes], gcode_text: str) -> bytes:
+    """Rebuild a .bgcode file with modified G-code text.
+
+    All non-GCode blocks from other_blocks are preserved in their original order.
+    A single new GCode block (COMP_NONE, ENC_RAW) is appended last, which is
+    the position required by the libbgcode convention (metadata must precede GCode).
+    """
+    BLK_GCODE = 1
+    COMP_NONE = 0
+    ENC_RAW = 0
+
+    def _crc(data: bytes, prev: int = 0) -> int:
+        return zlib.crc32(data, prev) & 0xFFFFFFFF
+
+    payload = gcode_text.encode("utf-8")
+    hdr = struct.pack("<HHI", BLK_GCODE, COMP_NONE, len(payload))
+    params = struct.pack("<H", ENC_RAW)
+    cksum = _crc(hdr)
+    cksum = _crc(params, cksum)
+    cksum = _crc(payload, cksum)
+    gcode_block = hdr + params + payload + struct.pack("<I", cksum)
+
+    return file_hdr + b"".join(other_blocks) + gcode_block
+
+
+def _rewrite_bgcode(
+    path: str,
+    skew_deg: float,
+    recenter: bool,
+    bed_x_min: float,
+    bed_x_max: float,
+    bed_y_min: float,
+    bed_y_max: float,
+    margin: float,
+    recenter_mode: str,
+    shear_y_ref_mode: str,
+    shear_y_ref: float,
+    analyze_only: bool,
+) -> None:
+    """Apply skew correction to a Prusa binary G-code (.bgcode) file in place.
+
+    Strategy:
+    1. Split the bgcode into its file header, non-GCode blocks, and G-code text.
+    2. Write the G-code text to a temporary plain-text file.
+    3. Run the full text rewrite pipeline on that temp file (all existing logic
+       is unchanged — bounds calculation, arc linearization, recenter, etc.).
+    4. Read back the corrected text, re-encode it as a new GCode block, and
+       reassemble the bgcode with the original non-GCode blocks intact.
+    5. Atomically replace the original file.
+
+    All non-GCode blocks (thumbnails, slicer/printer/print metadata) are
+    preserved bit-for-bit, so the result uploads cleanly to PrusaConnect.
+    """
+    with open(path, "rb") as f:
+        raw = f.read()
+
+    try:
+        file_hdr, other_blocks, gcode_text = _bgcode_split(raw)
+    except ValueError as exc:
+        raise SystemExit(f"prusaslicer-skew-fix: ERROR reading binary G-code: {exc}") from exc
+
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    fd, txt_tmp = tempfile.mkstemp(dir=d, suffix=".gcode", text=True)
+    txt_removed = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(gcode_text)
+
+        # All existing text-mode logic (bounds, recenter, arc linearization, rewrite)
+        # runs unchanged on the temp file — it has no idea it came from a bgcode.
+        rewrite(
+            txt_tmp,
+            skew_deg=skew_deg,
+            recenter=recenter,
+            bed_x_min=bed_x_min,
+            bed_x_max=bed_x_max,
+            bed_y_min=bed_y_min,
+            bed_y_max=bed_y_max,
+            margin=margin,
+            recenter_mode=recenter_mode,
+            shear_y_ref_mode=shear_y_ref_mode,
+            shear_y_ref=shear_y_ref,
+            analyze_only=analyze_only,
+        )
+
+        if not analyze_only:
+            with open(txt_tmp, "r", encoding="utf-8") as f:
+                modified_text = f.read()
+            os.unlink(txt_tmp)
+            txt_removed = True
+
+            new_bgcode = _bgcode_reassemble(file_hdr, other_blocks, modified_text)
+            fd2, bin_tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+            try:
+                with os.fdopen(fd2, "wb") as f:
+                    f.write(new_bgcode)
+                os.replace(bin_tmp, path)
+            finally:
+                if os.path.exists(bin_tmp):
+                    try:
+                        os.unlink(bin_tmp)
+                    except OSError:
+                        pass
+    finally:
+        if not txt_removed and os.path.exists(txt_tmp):
+            try:
+                os.unlink(txt_tmp)
+            except OSError:
+                pass
+
+
 # Rewrite the G-code in-place: arc linearization is ALWAYS enabled.
 # HARD-CODED ARC LINEARIZATION PARAMETERS (correctness-first):
 #   segment length = 0.20 mm
@@ -560,7 +788,11 @@ def rewrite(
     shear_y_ref: float,analyze_only: bool,
 ) -> None:
     """
-    Apply XY skew correction to a PrusaSlicer-generated *text* G-code file.
+    Apply XY skew correction to a PrusaSlicer-generated G-code file.
+
+    Accepts both plain-text .gcode and Prusa binary .bgcode files.  Binary
+    files are decoded, corrected, and re-encoded with all non-GCode blocks
+    (thumbnails, metadata) preserved intact.
 
     Notes on correctness vs textual similarity:
     - For any XY move (G0/G1) that specifies either X or Y, the transformed endpoint generally depends on BOTH
@@ -569,6 +801,22 @@ def rewrite(
     - Relative XY (G91) output is rejected for skew output (and for recentering), because the transform is
       defined in absolute bed coordinates.
     """
+    if _is_bgcode(path):
+        _rewrite_bgcode(
+            path,
+            skew_deg=skew_deg,
+            recenter=recenter,
+            bed_x_min=bed_x_min,
+            bed_x_max=bed_x_max,
+            bed_y_min=bed_y_min,
+            bed_y_max=bed_y_max,
+            margin=margin,
+            recenter_mode=recenter_mode,
+            shear_y_ref_mode=shear_y_ref_mode,
+            shear_y_ref=shear_y_ref,
+            analyze_only=analyze_only,
+        )
+        return
     _assert_text_gcode(path)
 
     k = math.tan(math.radians(skew_deg))
