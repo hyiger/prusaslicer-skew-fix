@@ -6,7 +6,7 @@ This document captures the structure, conventions, and workflows of this reposit
 
 ## Project Overview
 
-**prusaslicer-skew-fix** is a single-file Python 3 post-processing script for PrusaSlicer. It applies XY skew correction to text G-code files, compensating for non-orthogonality between the X and Y axes on 3D printers where firmware-level correction (`M852`) is unavailable (e.g. Prusa Buddy firmware / Core One).
+**prusaslicer-skew-fix** is a single-file Python 3 post-processing script for PrusaSlicer. It applies XY skew correction to G-code files, compensating for non-orthogonality between the X and Y axes on 3D printers where firmware-level correction (`M852`) is unavailable (e.g. Prusa Buddy firmware / Core One).
 
 The correction is an affine shear transform matching Marlin's `M852` model:
 
@@ -17,7 +17,8 @@ y' = y
 
 Key behaviors:
 - Arcs (`G2`/`G3`) are always linearized to `G1` segments because shear does not preserve circles.
-- Binary G-code is detected and rejected to prevent corruption.
+- Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported.
+- Binary `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact — suitable for direct upload to PrusaConnect.
 - File rewrites are atomic (temp file + replace).
 - Recenter/bounds computation uses model-only extruding geometry, excluding purge/wipe/parking.
 
@@ -28,13 +29,14 @@ Key behaviors:
 ```
 prusaslicer-skew-fix/
 ├── skew_fix_ps.py           # Main application — the entire tool in one file (~900 lines)
-├── tests/                   # pytest test suite (18 test modules)
+├── tests/                   # pytest test suite (19 test modules)
 │   ├── conftest.py          # Root conftest: adds repo root to sys.path, load_module fixture
 │   ├── test_analyze.py
 │   ├── test_arc_center_modes.py
 │   ├── test_arc_edge_cases.py
 │   ├── test_arcs_contract.py
 │   ├── test_basic.py
+│   ├── test_bgcode.py       # Binary .bgcode read/write/roundtrip tests
 │   ├── test_binary_guard.py
 │   ├── test_bounds.py
 │   ├── test_cli_integration.py
@@ -116,10 +118,27 @@ class State:
 | `compute_translation_for_bounds(...)` | Derives (dx, dy) to keep geometry within bed+margin |
 | `skew_deg_from_square(ac, bd, ad)` | Derives skew angle from square diagonal measurements |
 | `skew_deg_from_rectangle(ac, bd, ad, ab)` | Derives skew angle from rectangle measurements |
-| `_assert_text_gcode(path)` | Raises `SystemExit` if file appears to be binary G-code |
+| `_is_bgcode(path)` | Returns `True` if file starts with `GCDE` magic |
+| `_bgcode_split(data)` | Parses `.bgcode` bytes → `(file_hdr, other_blocks, gcode_text)` |
+| `_bgcode_reassemble(file_hdr, other_blocks, gcode_text)` | Rebuilds a `.bgcode` with modified G-code, preserving all other blocks |
+| `_rewrite_bgcode(path, ...)` | Orchestrates the decode → text-rewrite → re-encode pipeline for `.bgcode` |
+| `_assert_text_gcode(path)` | Raises `SystemExit` if file contains NUL bytes (non-bgcode binary) |
 | `analyze_gcode(path, args)` | Reports skew effects without modifying the file |
-| `rewrite(path, args)` | Main processing engine: parses, transforms, atomically rewrites |
+| `rewrite(path, args)` | Main processing engine: auto-detects text/.bgcode, transforms, atomically rewrites |
 | `main()` | CLI entry point (`argparse`) |
+
+### Binary G-code pipeline (`_rewrite_bgcode`)
+
+When the input file starts with the `GCDE` magic:
+1. `_bgcode_split` parses the file into `(file_hdr, other_blocks, gcode_text)`.
+   Non-GCode blocks (thumbnails, printer/slicer/print metadata) are saved as raw bytes.
+2. `gcode_text` is written to a temp `.gcode` file.
+3. The standard text `rewrite()` pipeline runs on that temp file unchanged.
+4. The corrected text is read back and passed to `_bgcode_reassemble`, which builds a new GCode block and concatenates it after the preserved non-GCode blocks.
+5. The resulting bytes atomically replace the original file.
+
+**Supported:** `COMP_NONE` and `COMP_DEFLATE` GCode block payloads; `ENC_RAW` (UTF-8) encoding.
+**Unsupported:** Heatshrink compression, MeatPack encoding (both raise `SystemExit`).
 
 ### Relative XY handling
 
@@ -207,11 +226,12 @@ To match CI locally, use Python 3.10+ and run `pytest -q`.
 ## Important Constraints
 
 1. **Single-file architecture** — all logic lives in `skew_fix_ps.py`. Do not split into multiple modules unless there is a very strong reason.
-2. **No external runtime dependencies** — only Python standard library at runtime. `pytest` is dev-only.
+2. **No external runtime dependencies** — only Python standard library at runtime (`struct` and `zlib` are used for binary G-code). `pytest` is dev-only.
 3. **Python 3.10+ compatibility** — do not use syntax or stdlib features introduced after 3.10 without updating the CI matrix.
 4. **Correctness-locked constants** — `ARC_SEG_MM`, `ARC_MAX_DEG`, `EPS` control geometric accuracy. Changes require careful analysis of downstream effects on arc linearization and bounds calculations.
 5. **Relative XY is unsupported** — the transform requires absolute coordinates; do not attempt to add relative-XY support without rethinking the entire state-tracking model.
 6. **Z is never modified** — the transform is XY-only by design.
+7. **Binary G-code block ordering** — per the libbgcode spec, GCode blocks must appear last in the file (after all metadata blocks). `_bgcode_reassemble` enforces this. Do not reorder non-GCode blocks relative to each other.
 
 ---
 
