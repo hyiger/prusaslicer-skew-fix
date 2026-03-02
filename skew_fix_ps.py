@@ -50,6 +50,26 @@ OTHER_DECIMALS = 5
 
 MOVE_RE = re.compile(r"^(G0|G1)\b", re.IGNORECASE)
 ARC_RE  = re.compile(r"^(G2|G3)\b", re.IGNORECASE)
+_M862_RE = re.compile(r'^M862\.3\s+P\s*"([^"]*)"', re.IGNORECASE)
+
+# Known Prusa printer bed sizes (xmin, xmax, ymin, ymax) in mm.
+# Values represent the printable area used for bounds/recenter calculations.
+_PRUSA_BED_PRESETS: Dict[str, Tuple[float, float, float, float]] = {
+    "MK2":      (0.0, 250.0, 0.0, 210.0),
+    "MK2S":     (0.0, 250.0, 0.0, 210.0),
+    "MK2.5":    (0.0, 250.0, 0.0, 210.0),
+    "MK2.5S":   (0.0, 250.0, 0.0, 210.0),
+    "MK3":      (0.0, 250.0, 0.0, 210.0),
+    "MK3S":     (0.0, 250.0, 0.0, 210.0),
+    "MK3S+":    (0.0, 250.0, 0.0, 210.0),
+    "MK4":      (0.0, 250.0, 0.0, 210.0),
+    "MK4S":     (0.0, 250.0, 0.0, 210.0),
+    "MINI":     (0.0, 180.0, 0.0, 180.0),
+    "MINI+":    (0.0, 180.0, 0.0, 180.0),
+    "XL":       (0.0, 360.0, 0.0, 360.0),
+    "COREONE":  (0.0, 250.0, 0.0, 220.0),
+    "CORE ONE": (0.0, 250.0, 0.0, 220.0),
+}
 NUM_RE = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 AXIS_RE = re.compile(rf"([XYZEFRIJK])\s*({NUM_RE})", re.IGNORECASE)
 
@@ -418,6 +438,29 @@ def compute_inbed_extruding_bounds_original(path: str,bed_x_min: float, bed_x_ma
         move_point_fn=lambda x, y: (x, y),
     )
     return minx, maxx, miny, maxy
+
+def bed_bounds_from_m862(path: str) -> Optional[Tuple[float, float, float, float]]:
+    """Scan a G-code file for the first ``M862.3 P"<preset>"`` command and
+    return the corresponding bed bounds ``(x_min, x_max, y_min, y_max)``.
+
+    Lookup is case-insensitive.  Returns ``None`` if no ``M862.3 P`` line is
+    found or the printer name is not in ``_PRUSA_BED_PRESETS``.
+    """
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            m = _M862_RE.match(raw.lstrip())
+            if not m:
+                continue
+            name = m.group(1).strip()
+            if name in _PRUSA_BED_PRESETS:
+                return _PRUSA_BED_PRESETS[name]
+            # Case-insensitive fallback
+            upper = name.upper()
+            for key, bounds in _PRUSA_BED_PRESETS.items():
+                if key.upper() == upper:
+                    return bounds
+    return None
+
 
 # Compute dx/dy so skewed extruding in-bed geometry stays within the bed.
 def compute_translation_for_bounds(path: str, k: float, y_ref: float,bed_x_min: float, bed_x_max: float,
@@ -1094,10 +1137,13 @@ def main(argv: List[str]) -> None:
                     help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
     ap.add_argument("--recenter-mode", choices=["center", "clamp"], default="center",
                     help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.")
-    ap.add_argument("--bed-x-min", type=_finite_float, default=0.0)
-    ap.add_argument("--bed-x-max", type=_finite_float, default=250.0)
-    ap.add_argument("--bed-y-min", type=_finite_float, default=0.0)
-    ap.add_argument("--bed-y-max", type=_finite_float, default=220.0)
+    ap.add_argument("--auto-bed", action="store_true",
+                    help="Auto-detect bed bounds from M862.3 P\"<preset>\" in the G-code file. "
+                         "Explicit --bed-* flags override the detected values.")
+    ap.add_argument("--bed-x-min", type=_finite_float, default=None)
+    ap.add_argument("--bed-x-max", type=_finite_float, default=None)
+    ap.add_argument("--bed-y-min", type=_finite_float, default=None)
+    ap.add_argument("--bed-y-max", type=_finite_float, default=None)
     ap.add_argument("--margin", type=_non_negative_float, default=0.0, help="Safety margin (mm) from bed edges.")
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
@@ -1113,9 +1159,29 @@ def main(argv: List[str]) -> None:
             skew_deg = skew_deg_from_rectangle(a.skew_from_rectangle)
     except ValueError as exc:
         ap.error(str(exc))
-    if a.bed_x_min > a.bed_x_max:
+
+    # Resolve bed bounds: explicit CLI flags > --auto-bed preset > hardcoded defaults.
+    _DEFAULT_BED = (0.0, 250.0, 0.0, 220.0)
+    path = a.gcode
+    if a.auto_bed:
+        auto = bed_bounds_from_m862(path)
+        if auto is None:
+            print(
+                "prusaslicer-skew-fix: WARNING: --auto-bed: no recognized M862.3 P preset found; "
+                "using defaults.",
+                file=sys.stderr,
+            )
+        detected = auto if auto is not None else _DEFAULT_BED
+    else:
+        detected = _DEFAULT_BED
+    bed_x_min = a.bed_x_min if a.bed_x_min is not None else detected[0]
+    bed_x_max = a.bed_x_max if a.bed_x_max is not None else detected[1]
+    bed_y_min = a.bed_y_min if a.bed_y_min is not None else detected[2]
+    bed_y_max = a.bed_y_max if a.bed_y_max is not None else detected[3]
+
+    if bed_x_min > bed_x_max:
         ap.error("--bed-x-min must be <= --bed-x-max.")
-    if a.bed_y_min > a.bed_y_max:
+    if bed_y_min > bed_y_max:
         ap.error("--bed-y-min must be <= --bed-y-max.")
 
     # Apply formatting settings from CLI. These are used throughout rewrite() via globals.
@@ -1123,18 +1189,16 @@ def main(argv: List[str]) -> None:
     XY_DECIMALS = a.xy_decimals
     OTHER_DECIMALS = a.other_decimals
 
-    path = a.gcode
-
     rewrite(
         path,
         skew_deg=skew_deg,
         shear_y_ref_mode=a.shear_y_ref_mode,
         shear_y_ref=a.shear_y_ref,
         recenter=a.recenter_to_bed,
-        bed_x_min=a.bed_x_min,
-        bed_x_max=a.bed_x_max,
-        bed_y_min=a.bed_y_min,
-        bed_y_max=a.bed_y_max,
+        bed_x_min=bed_x_min,
+        bed_x_max=bed_x_max,
+        bed_y_min=bed_y_min,
+        bed_y_max=bed_y_max,
         margin=a.margin,
         recenter_mode=a.recenter_mode,
         analyze_only=a.analyze_only,
