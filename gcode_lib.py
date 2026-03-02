@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-__version__ = "1.5.0"
+__version__ = "1.7.0"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1325,6 +1325,7 @@ def apply_xy_transform(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Apply an arbitrary XY transform to all G0/G1 move endpoints.
 
@@ -1340,6 +1341,11 @@ def apply_xy_transform(
 
     Raises :class:`ValueError` when a move with X/Y words is encountered
     in relative XY mode (G91), as the transform requires absolute coords.
+
+    When *skip_negative_y* is ``True`` (the default), moves whose effective
+    absolute Y position is negative are passed through untransformed.  This
+    prevents PrusaSlicer purge-line and wipe moves (which dip below Y=0)
+    from being modified.
     """
     result: List[GCodeLine] = []
     state = initial_state.copy() if initial_state else ModalState()
@@ -1353,6 +1359,11 @@ def apply_xy_transform(
                 )
             x_t = line.words.get("X", state.x)
             y_t = line.words.get("Y", state.y)
+
+            if skip_negative_y and y_t < 0:
+                result.append(line)
+                advance_state(state, line)
+                continue
             xs, ys = fn(x_t, y_t)
 
             code, comment = split_comment(line.raw)
@@ -1401,6 +1412,7 @@ def apply_skew(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Apply XY skew correction to all G0/G1 move endpoints.
 
@@ -1425,6 +1437,7 @@ def apply_skew(
         xy_decimals=xy_decimals,
         other_decimals=other_decimals,
         initial_state=initial_state,
+        skip_negative_y=skip_negative_y,
     )
 
 
@@ -1436,6 +1449,7 @@ def translate_xy(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Translate all G0/G1 XY move endpoints by ``(dx, dy)``."""
     return apply_xy_transform(
@@ -1444,6 +1458,7 @@ def translate_xy(
         xy_decimals=xy_decimals,
         other_decimals=other_decimals,
         initial_state=initial_state,
+        skip_negative_y=skip_negative_y,
     )
 
 
@@ -1456,6 +1471,7 @@ def compute_bounds(
     *,
     extruding_only: bool = False,
     include_arcs: bool = True,
+    skip_negative_y: bool = False,
     arc_seg_mm: float = DEFAULT_ARC_SEG_MM,
     arc_max_deg: float = DEFAULT_ARC_MAX_DEG,
     initial_state: Optional[ModalState] = None,
@@ -1466,6 +1482,7 @@ def compute_bounds(
     ----------
     extruding_only: Include only endpoints/points from extruding moves.
     include_arcs:   Linearize G2/G3 arcs and include their sample points.
+    skip_negative_y: Exclude moves whose effective Y position is negative.
     """
     bounds = Bounds()
     state  = initial_state.copy() if initial_state else ModalState()
@@ -1486,7 +1503,8 @@ def compute_bounds(
                 if "E" in line.words:
                     e_w    = line.words["E"]
                     is_ext = (e_w > state.e) if state.abs_e else (e_w > 0.0)
-                if not extruding_only or is_ext:
+                skip_y = skip_negative_y and y1 < 0
+                if (not extruding_only or is_ext) and not skip_y:
                     bounds.expand(x1, y1)
 
             if "Z" in line.words:
@@ -1504,7 +1522,8 @@ def compute_bounds(
                 is_ext = (e_w > state.e) if state.abs_e else (e_w > 0.0)
             if not extruding_only or is_ext:
                 for xi, yi in pts:
-                    bounds.expand(xi, yi)
+                    if not (skip_negative_y and yi < 0):
+                        bounds.expand(xi, yi)
             advance_state(state, line)
 
         else:
@@ -1758,6 +1777,7 @@ def translate_xy_allow_arcs(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Translate XY by ``(dx, dy)``, handling G2/G3 arcs natively.
 
@@ -1776,6 +1796,9 @@ def translate_xy_allow_arcs(
     in G91 (relative XY) mode.  Call :func:`to_absolute_xy` first if the
     file uses G91 sections.
 
+    When *skip_negative_y* is ``True`` (the default), moves whose effective
+    absolute Y position is negative are passed through untransformed.
+
     Parameters
     ----------
     lines:         Input G-code line list.
@@ -1783,6 +1806,7 @@ def translate_xy_allow_arcs(
     xy_decimals:   Decimal places for X/Y output.
     other_decimals: Decimal places for other axes.
     initial_state: Optional starting :class:`ModalState`.
+    skip_negative_y: Skip moves at Y < 0 (default ``True``).
     """
     result: List[GCodeLine] = []
     state = initial_state.copy() if initial_state else ModalState()
@@ -1797,6 +1821,12 @@ def translate_xy_allow_arcs(
                     "translate_xy_allow_arcs: relative XY (G91) is not supported. "
                     "Call to_absolute_xy() first."
                 )
+
+            y_eff = words.get("Y", state.y)
+            if skip_negative_y and y_eff < 0:
+                result.append(line)
+                advance_state(state, line)
+                continue
 
             code, comment = split_comment(line.raw)
             new_code = code
@@ -1836,6 +1866,181 @@ def translate_xy_allow_arcs(
             result.append(line)
 
         advance_state(state, line)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# §4.2b — rotate_xy: rotate XY with optional bed boundary validation
+# ---------------------------------------------------------------------------
+
+def rotate_xy(
+    lines: List[GCodeLine],
+    angle_deg: float,
+    *,
+    pivot_x: Optional[float] = None,
+    pivot_y: Optional[float] = None,
+    bed_min_x: Optional[float] = None,
+    bed_max_x: Optional[float] = None,
+    bed_min_y: Optional[float] = None,
+    bed_max_y: Optional[float] = None,
+    margin: float = 0.0,
+    xy_decimals: int = DEFAULT_XY_DECIMALS,
+    other_decimals: int = DEFAULT_OTHER_DECIMALS,
+    initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
+) -> List[GCodeLine]:
+    """Rotate XY coordinates by *angle_deg* degrees (counter-clockwise positive).
+
+    Handles G0/G1 moves **and** G2/G3 arcs natively — no prior
+    linearization required.  The I/J arc-centre offsets are rotated by the
+    same angle so arcs remain geometrically correct.
+
+    When *skip_negative_y* is ``True`` (the default), moves whose effective
+    absolute Y position is negative are passed through untransformed.  The
+    default pivot and bed validation also use extruding-only bounds so that
+    purge-line moves do not affect rotation centre or boundary checks.
+
+    Parameters
+    ----------
+    lines:         Input G-code line list.
+    angle_deg:     Rotation angle in degrees.  Positive = counter-clockwise.
+    pivot_x, pivot_y:
+        Centre of rotation.  When ``None`` (the default), the centroid of
+        the print's bounding box is used.
+    bed_min_x, bed_max_x, bed_min_y, bed_max_y:
+        If **all four** are provided the rotated print is validated against
+        the bed area.  If the rotated print fits, it is re-centred within
+        the available area.  If it does not fit (even after re-centring),
+        :class:`ValueError` is raised.
+    margin:        Inset applied to all four bed edges (mm).
+    xy_decimals:   Decimal places for X/Y output.
+    other_decimals: Decimal places for other axes.
+    initial_state: Optional starting :class:`ModalState`.
+    skip_negative_y: Skip moves at Y < 0 (default ``True``).
+
+    Raises
+    ------
+    ValueError
+        If relative XY mode (G91) is encountered, or if the rotated print
+        exceeds the bed area after re-centring.
+    """
+    theta = math.radians(angle_deg)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+
+    # --- Determine pivot ------------------------------------------------
+    if pivot_x is None or pivot_y is None:
+        bounds = compute_bounds(
+            lines, skip_negative_y=skip_negative_y,
+            initial_state=initial_state,
+        )
+        if not bounds.valid:
+            return list(lines)          # nothing to rotate
+        if pivot_x is None:
+            pivot_x = bounds.center_x
+        if pivot_y is None:
+            pivot_y = bounds.center_y
+
+    # --- Helper: rotate a point around the pivot ------------------------
+    def _rot(x: float, y: float) -> Tuple[float, float]:
+        dx = x - pivot_x
+        dy = y - pivot_y
+        return (pivot_x + dx * cos_t - dy * sin_t,
+                pivot_y + dx * sin_t + dy * cos_t)
+
+    # --- Helper: rotate a relative vector (I/J offset) ------------------
+    def _rot_vec(i: float, j: float) -> Tuple[float, float]:
+        return (i * cos_t - j * sin_t,
+                i * sin_t + j * cos_t)
+
+    # --- Rotation pass --------------------------------------------------
+    result: List[GCodeLine] = []
+    state = initial_state.copy() if initial_state else ModalState()
+
+    for line in lines:
+        words = line.words
+        has_xy = "X" in words or "Y" in words
+
+        if (line.is_move or line.is_arc) and has_xy:
+            if not state.abs_xy:
+                raise ValueError(
+                    "rotate_xy: relative XY (G91) is not supported. "
+                    "Call to_absolute_xy() first."
+                )
+
+            # Resolve full absolute position then rotate
+            x_abs = words.get("X", state.x)
+            y_abs = words.get("Y", state.y)
+
+            if skip_negative_y and y_abs < 0:
+                result.append(line)
+                advance_state(state, line)
+                continue
+
+            xr, yr = _rot(x_abs, y_abs)
+
+            code, comment = split_comment(line.raw)
+            new_code = code
+            new_words = dict(words)
+
+            if "X" in words:
+                new_words["X"] = xr
+                new_code = replace_or_append(new_code, "X", xr, xy_decimals, other_decimals)
+            if "Y" in words:
+                new_words["Y"] = yr
+                new_code = replace_or_append(new_code, "Y", yr, xy_decimals, other_decimals)
+
+            # Rotate arc I/J offsets
+            if line.is_arc:
+                i_val = words.get("I", 0.0)
+                j_val = words.get("J", 0.0)
+                if state.ij_relative:
+                    # Relative IJ: rotate the offset vector
+                    ir, jr = _rot_vec(i_val, j_val)
+                else:
+                    # Absolute IJ: rotate as a point around the pivot
+                    ir, jr = _rot(i_val, j_val)
+                if "I" in words or not state.ij_relative:
+                    new_words["I"] = ir
+                    new_code = replace_or_append(new_code, "I", ir, xy_decimals, other_decimals)
+                if "J" in words or not state.ij_relative:
+                    new_words["J"] = jr
+                    new_code = replace_or_append(new_code, "J", jr, xy_decimals, other_decimals)
+
+            new_raw = new_code.rstrip() + ("" if not comment else " " + comment.lstrip())
+            result.append(GCodeLine(
+                raw=new_raw, command=line.command, words=new_words, comment=comment
+            ))
+        else:
+            result.append(line)
+
+        advance_state(state, line)
+
+    # --- Bed boundary validation and re-centring ------------------------
+    has_bed = (bed_min_x is not None and bed_max_x is not None
+               and bed_min_y is not None and bed_max_y is not None)
+    if has_bed:
+        rb = compute_bounds(result, skip_negative_y=skip_negative_y)
+        if rb.valid:
+            avail_x = (bed_max_x - bed_min_x) - 2 * margin
+            avail_y = (bed_max_y - bed_min_y) - 2 * margin
+            if rb.width > avail_x + EPS or rb.height > avail_y + EPS:
+                raise ValueError(
+                    f"rotate_xy: rotated print ({rb.width:.2f} x {rb.height:.2f} mm) "
+                    f"exceeds available bed area ({avail_x:.2f} x {avail_y:.2f} mm)."
+                )
+            bed_cx = (bed_min_x + bed_max_x) / 2
+            bed_cy = (bed_min_y + bed_max_y) / 2
+            dx = bed_cx - rb.center_x
+            dy = bed_cy - rb.center_y
+            if abs(dx) > EPS or abs(dy) > EPS:
+                result = translate_xy_allow_arcs(
+                    result, dx, dy,
+                    xy_decimals=xy_decimals,
+                    other_decimals=other_decimals,
+                    skip_negative_y=skip_negative_y,
+                )
 
     return result
 
@@ -1971,6 +2176,7 @@ def recenter_to_bed(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Centre or scale a print to fit within the specified bed extents.
 
@@ -1987,6 +2193,7 @@ def recenter_to_bed(
                bed space (arcs must be linearized beforehand).
     xy_decimals, other_decimals: Output decimal precision.
     initial_state: Optional starting :class:`ModalState`.
+    skip_negative_y: Skip moves at Y < 0 (default ``True``).
 
     Raises
     ------
@@ -1998,7 +2205,9 @@ def recenter_to_bed(
     if mode not in ("center", "fit"):
         raise ValueError(f"recenter_to_bed: mode must be 'center' or 'fit', got {mode!r}")
 
-    bounds = compute_bounds(lines, initial_state=initial_state)
+    bounds = compute_bounds(
+        lines, skip_negative_y=skip_negative_y, initial_state=initial_state,
+    )
     if not bounds.valid:
         return list(lines)
 
@@ -2013,6 +2222,7 @@ def recenter_to_bed(
             xy_decimals=xy_decimals,
             other_decimals=other_decimals,
             initial_state=initial_state,
+            skip_negative_y=skip_negative_y,
         )
 
     # "fit" mode — uniform scale + translate.
@@ -2038,6 +2248,7 @@ def recenter_to_bed(
         xy_decimals=xy_decimals,
         other_decimals=other_decimals,
         initial_state=initial_state,
+        skip_negative_y=skip_negative_y,
     )
 
 
@@ -2162,6 +2373,7 @@ def apply_xy_transform_by_layer(
     xy_decimals: int = DEFAULT_XY_DECIMALS,
     other_decimals: int = DEFAULT_OTHER_DECIMALS,
     initial_state: Optional[ModalState] = None,
+    skip_negative_y: bool = True,
 ) -> List[GCodeLine]:
     """Apply *transform_fn* only to layers within ``[z_min, z_max]``.
 
@@ -2177,6 +2389,7 @@ def apply_xy_transform_by_layer(
     lines:        G-code line list.
     transform_fn: ``(x, y) -> (x', y')`` callable.
     z_min, z_max: Optional Z range filter (inclusive).
+    skip_negative_y: Skip moves at Y < 0 (default ``True``).
     """
     result: List[GCodeLine] = []
     state = initial_state.copy() if initial_state else ModalState()
@@ -2197,6 +2410,13 @@ def apply_xy_transform_by_layer(
                 )
             x_orig = line.words.get("X", state.x)
             y_orig = line.words.get("Y", state.y)
+
+            if skip_negative_y and y_orig < 0:
+                result.append(line)
+                advance_state(state, line)
+                if "Z" in line.words:
+                    current_z = line.words["Z"] if state.abs_xy else current_z + line.words["Z"]
+                continue
             x_new, y_new = transform_fn(x_orig, y_orig)
 
             code, comment = split_comment(line.raw)
