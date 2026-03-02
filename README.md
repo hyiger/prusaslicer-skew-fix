@@ -99,7 +99,7 @@ Modes:
 
 When `--bed-x-max` / `--bed-y-max` are not specified, the script scans the G-code for a
 `M862.3 P` printer model check (emitted by PrusaSlicer) and looks up the bed dimensions
-from built-in presets. Supported models: **COREONE**, **MK4**, **MK3S**, **MINI**, **XL**.
+from built-in presets. Supported models: **COREONE**, **COREONEL**, **MK4**, **MK3S**, **MINI**, **XL**.
 
 If no recognised model is found, the script falls back to 250 x 220 mm (Core ONE defaults).
 Explicit `--bed-*` flags always take precedence over auto-detection.
