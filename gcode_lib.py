@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -2025,6 +2025,11 @@ PRINTER_PRESETS: Dict[str, Dict[str, float]] = {
         "bed_y": 220.0,
         "max_z": 250.0,
     },
+    "COREONEL": {
+        "bed_x": 300.0,
+        "bed_y": 300.0,
+        "max_z": 330.0,
+    },
     "MK4": {
         "bed_x": 250.0,
         "bed_y": 210.0,
@@ -2087,6 +2092,46 @@ FILAMENT_PRESETS: Dict[str, Dict[str, object]] = {
 
 Keys: ``hotend`` (°C), ``bed`` (°C), ``fan`` (0–100 %), ``retract`` (mm).
 """
+
+_M862_3_RE = re.compile(
+    r'^M862\.3\s+P\s*"?([A-Za-z0-9_]+)"?',
+)
+"""Matches ``M862.3 P "COREONE"`` or ``M862.3 P COREONE`` and captures the
+printer name."""
+
+
+def detect_printer_preset(lines: List[GCodeLine]) -> Optional[str]:
+    """Detect the printer preset from an ``M862.3 P`` line in *lines*.
+
+    Scans for a Prusa ``M862.3`` printer-model check command and returns
+    the matching key from :data:`PRINTER_PRESETS`, or ``None`` if no
+    recognised model is found.
+
+    The match is case-insensitive so ``"coreone"`` in the G-code will
+    still match the ``"COREONE"`` preset key.
+    """
+    for line in lines:
+        if not line.command.startswith("M862"):
+            continue
+        m = _M862_3_RE.match(line.raw.strip())
+        if m:
+            name = m.group(1).upper()
+            if name in PRINTER_PRESETS:
+                return name
+    return None
+
+
+def detect_print_volume(lines: List[GCodeLine]) -> Optional[Dict[str, float]]:
+    """Detect the print volume from an ``M862.3 P`` line in *lines*.
+
+    Returns the matching :data:`PRINTER_PRESETS` entry (a dict with keys
+    ``bed_x``, ``bed_y``, ``max_z``) or ``None`` if no recognised printer
+    model is found.
+    """
+    name = detect_printer_preset(lines)
+    if name is not None:
+        return dict(PRINTER_PRESETS[name])
+    return None
 
 
 # ---------------------------------------------------------------------------
