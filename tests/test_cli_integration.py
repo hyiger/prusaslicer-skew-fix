@@ -54,3 +54,37 @@ def test_cli_single_line_move_ok(tmp_path):
     g.write_text("G90\nG1 X5 Y5\n", encoding="utf-8")
     r = _run(["--skew-deg", "-0.15", "--recenter-to-bed", "--recenter-mode", "clamp", str(g)])
     assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_cli_auto_bed_detect_no_flags_ok(tmp_path):
+    """CLI succeeds without --bed-* flags when M862.3 P is present."""
+    g = tmp_path / "t.gcode"
+    g.write_text(
+        'M862.3 P "MK4"\nG90\nM82\nG1 X100 Y100 E1.0\n',
+        encoding="utf-8",
+    )
+    r = _run(["--skew-deg", "-0.15", str(g)])
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_cli_auto_bed_fallback_no_m862(tmp_path):
+    """CLI succeeds without --bed-* flags even when no M862.3 is present."""
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nM82\nG1 X100 Y100 E1.0\n", encoding="utf-8")
+    r = _run(["--skew-deg", "-0.15", str(g)])
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_cli_explicit_bed_overrides_auto(tmp_path):
+    """Explicit --bed-* flags are accepted alongside auto-detection."""
+    g = tmp_path / "t.gcode"
+    g.write_text(
+        'M862.3 P "COREONE"\nG90\nM82\nG1 X50 Y50 E1.0\n',
+        encoding="utf-8",
+    )
+    r = _run([
+        "--skew-deg", "0.0",
+        "--bed-x-max", "100", "--bed-y-max", "100",
+        str(g),
+    ])
+    assert r.returncode == 0, r.stderr + r.stdout

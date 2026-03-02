@@ -100,6 +100,53 @@ def test_binary_guard_rejects_nul_binary(tmp_path, load_module):
             analyze_only=False
         )
 
+def test_rewrite_auto_bed_detect_mk4(tmp_path, load_module):
+    """rewrite() with bed bounds=None auto-detects from M862.3 P."""
+    m = load_module
+    g = tmp_path / "t.gcode"
+    g.write_text("\n".join([
+        'M862.3 P "MK4"',
+        "G90",
+        "M82",
+        "G1 X100 Y100 E1.0",
+        "",
+    ]), encoding="utf-8")
+
+    m.rewrite(
+        str(g),
+        skew_deg=-0.15,
+        recenter=False,
+        bed_x_min=None, bed_x_max=None, bed_y_min=None, bed_y_max=None,
+        margin=0.0,
+        recenter_mode="center",
+        shear_y_ref_mode="auto", shear_y_ref=0.0,
+        analyze_only=False,
+    )
+    # Should succeed — bed bounds derived from MK4 preset (250x210)
+    txt = g.read_text(encoding="utf-8")
+    assert "G1" in txt
+
+
+def test_rewrite_auto_bed_fallback_no_m862(tmp_path, load_module):
+    """rewrite() falls back to 250x220 when no M862.3 found."""
+    m = load_module
+    g = tmp_path / "t.gcode"
+    g.write_text("G90\nM82\nG1 X100 Y100 E1.0\n", encoding="utf-8")
+
+    m.rewrite(
+        str(g),
+        skew_deg=-0.15,
+        recenter=False,
+        bed_x_min=None, bed_x_max=None, bed_y_min=None, bed_y_max=None,
+        margin=0.0,
+        recenter_mode="center",
+        shear_y_ref_mode="auto", shear_y_ref=0.0,
+        analyze_only=False,
+    )
+    txt = g.read_text(encoding="utf-8")
+    assert "G1" in txt
+
+
 def test_binary_guard_rejects_gcde_within_header_window(tmp_path, load_module):
     m = load_module
     p = tmp_path / "bad_header.gcode"

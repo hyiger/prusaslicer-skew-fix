@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import gcode_lib
 
@@ -431,10 +431,10 @@ def rewrite(
     path: str,
     skew_deg: float,
     recenter: bool,
-    bed_x_min: float,
-    bed_x_max: float,
-    bed_y_min: float,
-    bed_y_max: float,
+    bed_x_min: Optional[float],
+    bed_x_max: Optional[float],
+    bed_y_min: Optional[float],
+    bed_y_max: Optional[float],
     margin: float,
     recenter_mode: str,
     shear_y_ref_mode: str,
@@ -448,12 +448,39 @@ def rewrite(
     Accepts both plain-text .gcode and Prusa binary .bgcode files.  Binary
     files are decoded, corrected, and re-encoded with all non-GCode blocks
     (thumbnails, metadata) preserved intact.
+
+    Bed bounds (bed_x_min/max, bed_y_min/max) are auto-detected from the
+    G-code ``M862.3 P`` printer-model check when not explicitly provided.
+    Falls back to 250 x 220 mm (Core ONE) if detection fails.
     """
     # 1. Load file (auto-detects text/bgcode)
     try:
         gf = gcode_lib.load(path)
     except ValueError as exc:
         raise SystemExit(f"prusaslicer-skew-fix: ERROR: {exc}") from exc
+
+    # 2. Auto-detect bed bounds from printer model if not explicitly set
+    if bed_x_min is None or bed_x_max is None or bed_y_min is None or bed_y_max is None:
+        vol = gcode_lib.detect_print_volume(gf.lines)
+        if vol is not None:
+            if bed_x_min is None:
+                bed_x_min = 0.0
+            if bed_x_max is None:
+                bed_x_max = vol["bed_x"]
+            if bed_y_min is None:
+                bed_y_min = 0.0
+            if bed_y_max is None:
+                bed_y_max = vol["bed_y"]
+        else:
+            # Fallback defaults (Core ONE)
+            if bed_x_min is None:
+                bed_x_min = 0.0
+            if bed_x_max is None:
+                bed_x_max = 250.0
+            if bed_y_min is None:
+                bed_y_min = 0.0
+            if bed_y_max is None:
+                bed_y_max = 220.0
 
     k = math.tan(math.radians(skew_deg))
 
@@ -564,10 +591,14 @@ def main(argv: List[str]) -> None:
                     help="Recenter using in-bed EXTRUDING bounds only (ignores purge/wipe outside the bed).")
     ap.add_argument("--recenter-mode", choices=["center", "clamp"], default="center",
                     help="center: place within allowable range mid-point (default). clamp: minimal shift from 0.")
-    ap.add_argument("--bed-x-min", type=_finite_float, default=0.0)
-    ap.add_argument("--bed-x-max", type=_finite_float, default=250.0)
-    ap.add_argument("--bed-y-min", type=_finite_float, default=0.0)
-    ap.add_argument("--bed-y-max", type=_finite_float, default=220.0)
+    ap.add_argument("--bed-x-min", type=_finite_float, default=None,
+                    help="Bed X minimum (default: auto-detect from G-code, else 0).")
+    ap.add_argument("--bed-x-max", type=_finite_float, default=None,
+                    help="Bed X maximum (default: auto-detect from G-code, else 250).")
+    ap.add_argument("--bed-y-min", type=_finite_float, default=None,
+                    help="Bed Y minimum (default: auto-detect from G-code, else 0).")
+    ap.add_argument("--bed-y-max", type=_finite_float, default=None,
+                    help="Bed Y maximum (default: auto-detect from G-code, else 220).")
     ap.add_argument("--margin", type=_non_negative_float, default=0.0, help="Safety margin (mm) from bed edges.")
     ap.add_argument("gcode", help="Path to generated .gcode (PrusaSlicer supplies this)")
     a = ap.parse_args(argv)
@@ -583,9 +614,9 @@ def main(argv: List[str]) -> None:
             skew_deg = skew_deg_from_rectangle(a.skew_from_rectangle)
     except ValueError as exc:
         ap.error(str(exc))
-    if a.bed_x_min > a.bed_x_max:
+    if a.bed_x_min is not None and a.bed_x_max is not None and a.bed_x_min > a.bed_x_max:
         ap.error("--bed-x-min must be <= --bed-x-max.")
-    if a.bed_y_min > a.bed_y_max:
+    if a.bed_y_min is not None and a.bed_y_max is not None and a.bed_y_min > a.bed_y_max:
         ap.error("--bed-y-min must be <= --bed-y-max.")
 
     path = a.gcode
