@@ -3,7 +3,7 @@
 XY skew correction for PrusaSlicer when firmware skew correction (`M852`) is unavailable
 (for example, Prusa Buddy firmware / Core One).
 
-This script is a post-processing step that rewrites **text `.gcode`** after slicing.
+This script is a post-processing step that rewrites **`.gcode`** and **`.bgcode`** files after slicing.
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ Marlin firmware typically fixes this with `M852`; this tool applies the equivale
 skew_fix_ps.py [options] gcode
 ```
 
-- `gcode` (positional): path to generated text `.gcode`
+- `gcode` (positional): path to `.gcode` or `.bgcode` file
 - Skew source (choose exactly one):
 - `--skew-deg SKEW_DEG`
 - `--skew-from-square AC,BD,AD`
@@ -39,10 +39,10 @@ skew_fix_ps.py [options] gcode
 - `--analyze-only`
 - `--recenter-to-bed`
 - `--recenter-mode {center,clamp}` (default: `center`)
-- `--bed-x-min` (default: `0`)
-- `--bed-x-max` (default: `250`)
-- `--bed-y-min` (default: `0`)
-- `--bed-y-max` (default: `220`)
+- `--bed-x-min` (default: auto-detect, else `0`)
+- `--bed-x-max` (default: auto-detect, else `250`)
+- `--bed-y-min` (default: auto-detect, else `0`)
+- `--bed-y-max` (default: auto-detect, else `220`)
 - `--margin` (default: `0`, must be non-negative)
 
 ## Core Behavior
@@ -95,6 +95,15 @@ Modes:
 
 `clamp` is usually more predictable for placement.
 
+### Automatic bed size detection
+
+When `--bed-x-max` / `--bed-y-max` are not specified, the script scans the G-code for a
+`M862.3 P` printer model check (emitted by PrusaSlicer) and looks up the bed dimensions
+from built-in presets. Supported models: **COREONE**, **MK4**, **MK3S**, **MINI**, **XL**.
+
+If no recognised model is found, the script falls back to 250 x 220 mm (Core ONE defaults).
+Explicit `--bed-*` flags always take precedence over auto-detection.
+
 ### Output formatting
 
 For rewritten motion lines:
@@ -116,6 +125,7 @@ Reports include pre/post bounds, max `|ΔX|`, and recenter shift (when enabled).
 ## Safety and File Handling
 
 - Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported.
+- `.bgcode` compression: `COMP_NONE`, `COMP_DEFLATE`, and `Heatshrink` (11/4 and 12/4) are supported. MeatPack encoding is not supported.
 - `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact — suitable for direct upload to PrusaConnect.
 - Unrecognised binary files (NUL bytes, non-`GCDE` magic) are rejected with an error.
 - Rewrite is done via temp file and atomic replace.

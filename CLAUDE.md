@@ -6,7 +6,9 @@ This document captures the structure, conventions, and workflows of this reposit
 
 ## Project Overview
 
-**prusaslicer-skew-fix** is a single-file Python 3 post-processing script for PrusaSlicer. It applies XY skew correction to G-code files, compensating for non-orthogonality between the X and Y axes on 3D printers where firmware-level correction (`M852`) is unavailable (e.g. Prusa Buddy firmware / Core One).
+**prusaslicer-skew-fix** is a Python 3 post-processing script for PrusaSlicer. It applies XY skew correction to G-code files, compensating for non-orthogonality between the X and Y axes on 3D printers where firmware-level correction (`M852`) is unavailable (e.g. Prusa Buddy firmware / Core One).
+
+The application-specific logic lives in `skew_fix_ps.py` (~460 lines). Generic G-code parsing, formatting, state tracking, arc linearization, and binary G-code handling are provided by `gcode_lib.py` (vendored from a separate library).
 
 The correction is an affine shear transform matching Marlin's `M852` model:
 
@@ -17,8 +19,9 @@ y' = y
 
 Key behaviors:
 - Arcs (`G2`/`G3`) are always linearized to `G1` segments because shear does not preserve circles.
-- Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported.
+- Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported (including Heatshrink-compressed `.bgcode`).
 - Binary `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact — suitable for direct upload to PrusaConnect.
+- Bed bounds are auto-detected from `M862.3 P` printer model commands when not explicitly specified.
 - File rewrites are atomic (temp file + replace).
 - Recenter/bounds computation uses model-only extruding geometry, excluding purge/wipe/parking.
 
@@ -28,8 +31,9 @@ Key behaviors:
 
 ```
 prusaslicer-skew-fix/
-├── skew_fix_ps.py           # Main application — the entire tool in one file (~900 lines)
-├── tests/                   # pytest test suite (19 test modules)
+├── skew_fix_ps.py           # Application logic: CLI, bounds, recentering, analysis (~460 lines)
+├── gcode_lib.py             # Vendored G-code library: parsing, formatting, transforms, bgcode I/O
+├── tests/                   # pytest test suite
 │   ├── conftest.py          # Root conftest: adds repo root to sys.path, load_module fixture
 │   ├── test_analyze.py
 │   ├── test_arc_center_modes.py
@@ -62,83 +66,47 @@ prusaslicer-skew-fix/
 
 ---
 
-## Key Source File: `skew_fix_ps.py`
+## Source Files
 
-Everything lives in one file. There is no build step — it runs directly as `python3 skew_fix_ps.py`.
+### `gcode_lib.py` (vendored library)
 
-### Top-level constants (do not change without careful thought)
+Generic G-code library providing:
+- **Parsing:** `GCodeLine`, `ModalState`, `parse_line`, `parse_words`, `split_comment`
+- **State tracking:** `advance_state`, `iter_with_state`
+- **Transforms:** `linearize_arcs`, `apply_skew`, `translate_xy`, `apply_xy_transform`
+- **Bounds:** `compute_bounds`
+- **I/O:** `load`/`save` (auto-detects text/bgcode), `_bgcode_split`/`_bgcode_reassemble`
+- **Presets:** `PRINTER_PRESETS`, `detect_print_volume`, `detect_printer_preset`
+- **Compression:** `COMP_NONE`, `COMP_DEFLATE`, Heatshrink (11/4 and 12/4)
 
-These are marked `# ---- Correctness-locked constants ----` in the source:
+Constants (`gcode_lib.EPS`, `gcode_lib.DEFAULT_XY_DECIMALS`, etc.) are authoritative; `skew_fix_ps.py` references them.
 
-| Constant | Value | Purpose |
-|---|---|---|
-| `ARC_SEG_MM` | `0.20` | Max chord length (mm) per linearized arc segment |
-| `ARC_MAX_DEG` | `5.0` | Max angle (degrees) per linearized arc segment |
-| `EPS` | `1e-9` | Floating-point tolerance for comparisons |
-| `XY_DECIMALS` | `3` | Default decimal places for X/Y output |
-| `OTHER_DECIMALS` | `5` | Default decimal places for E/F/Z/other axes |
+### `skew_fix_ps.py` (application)
 
-### Pre-compiled regexes (module-level)
+Application-specific logic (~460 lines). There is no build step — it runs directly as `python3 skew_fix_ps.py`.
 
-```python
-MOVE_RE   # matches G0/G1 commands
-ARC_RE    # matches G2/G3 commands
-AXIS_RE   # parses axis words like X12.345, Y-0.5, E1.2e-3
-```
-
-### Core data structure: `State` dataclass
-
-Tracks G-code modal state during parsing:
-
-```python
-@dataclass
-class State:
-    abs_xy: bool = True       # G90 (abs) / G91 (rel) for X/Y
-    abs_e: bool = True        # M82 (abs) / M83 (rel) for E
-    ij_relative: bool = True  # G91.1 (rel IJ) / G90.1 (abs IJ)
-    x: float = 0.0            # Current absolute X position
-    y: float = 0.0            # Current absolute Y position
-    z: float = 0.0
-    e: float = 0.0
-    f: Optional[float] = None
-```
-
-### Key functions
+### Key functions in `skew_fix_ps.py`
 
 | Function | Role |
 |---|---|
-| `_handle_modal_state_line(st, up)` | Updates `State` for G90/G91/M82/M83/G90.1/G91.1; returns `True` if recognized |
-| `split_comment(line)` | Splits a G-code line into `(code, comment)` at first `;` |
-| `parse_words(code)` | Returns `Dict[str, float]` of axis words (X, Y, Z, E, F, I, J, K) |
-| `apply_skew_abs(x, y, k, y_ref)` | Applies shear: `x' = x + (y - y_ref) * k` |
-| `linearize_arc_points(...)` | Converts a G2/G3 arc into a list of `(x, y)` points |
-| `fmt_axis(name, value, decimals)` | Formats a single axis word with trimmed trailing zeros |
-| `replace_or_append(code, axis, value, decimals)` | Replaces or appends an axis word in a G-code command string |
 | `compute_inbed_extruding_bounds_original(...)` | Computes XY bounds from in-bed extruding moves |
 | `compute_translation_for_bounds(...)` | Derives (dx, dy) to keep geometry within bed+margin |
+| `_choose_translation(lo, hi, mode)` | Picks center or clamp translation |
+| `analyze_gcode(...)` | Reports skew effects without modifying the file |
+| `rewrite(path, ...)` | Main pipeline: load → linearize → skew → translate → save |
 | `skew_deg_from_square(ac, bd, ad)` | Derives skew angle from square diagonal measurements |
 | `skew_deg_from_rectangle(ac, bd, ad, ab)` | Derives skew angle from rectangle measurements |
-| `_is_bgcode(path)` | Returns `True` if file starts with `GCDE` magic |
-| `_bgcode_split(data)` | Parses `.bgcode` bytes → `(file_hdr, other_blocks, gcode_text)` |
-| `_bgcode_reassemble(file_hdr, other_blocks, gcode_text)` | Rebuilds a `.bgcode` with modified G-code, preserving all other blocks |
-| `_rewrite_bgcode(path, ...)` | Orchestrates the decode → text-rewrite → re-encode pipeline for `.bgcode` |
-| `_assert_text_gcode(path)` | Raises `SystemExit` if file contains NUL bytes (non-bgcode binary) |
-| `analyze_gcode(path, args)` | Reports skew effects without modifying the file |
-| `rewrite(path, args)` | Main processing engine: auto-detects text/.bgcode, transforms, atomically rewrites |
 | `main()` | CLI entry point (`argparse`) |
 
-### Binary G-code pipeline (`_rewrite_bgcode`)
+### Binary G-code pipeline
 
-When the input file starts with the `GCDE` magic:
-1. `_bgcode_split` parses the file into `(file_hdr, other_blocks, gcode_text)`.
-   Non-GCode blocks (thumbnails, printer/slicer/print metadata) are saved as raw bytes.
-2. `gcode_text` is written to a temp `.gcode` file.
-3. The standard text `rewrite()` pipeline runs on that temp file unchanged.
-4. The corrected text is read back and passed to `_bgcode_reassemble`, which builds a new GCode block and concatenates it after the preserved non-GCode blocks.
-5. The resulting bytes atomically replace the original file.
+Handled transparently by `gcode_lib.load()` and `gcode_lib.save()`:
+1. `load()` auto-detects text vs bgcode, decompresses (DEFLATE/Heatshrink), returns `GCodeFile`.
+2. `rewrite()` transforms the `GCodeFile.lines` list in-place.
+3. `save()` re-encodes as bgcode (or text), atomically replaces the original file.
 
-**Supported:** `COMP_NONE` and `COMP_DEFLATE` GCode block payloads; `ENC_RAW` (UTF-8) encoding.
-**Unsupported:** Heatshrink compression, MeatPack encoding (both raise `SystemExit`).
+**Supported:** `COMP_NONE`, `COMP_DEFLATE`, Heatshrink 11/4 and 12/4; `ENC_RAW` (UTF-8).
+**Unsupported:** MeatPack encoding (raises `SystemExit`).
 
 ### Relative XY handling
 
@@ -225,13 +193,13 @@ To match CI locally, use Python 3.10+ and run `pytest -q`.
 
 ## Important Constraints
 
-1. **Single-file architecture** — all logic lives in `skew_fix_ps.py`. Do not split into multiple modules unless there is a very strong reason.
-2. **No external runtime dependencies** — only Python standard library at runtime (`struct` and `zlib` are used for binary G-code). `pytest` is dev-only.
+1. **Two-file architecture** — application logic in `skew_fix_ps.py`, generic G-code operations in `gcode_lib.py` (vendored). Do not add other modules without strong reason.
+2. **No external runtime dependencies** — only Python standard library at runtime. `gcode_lib.py` is vendored (not a pip dependency). `pytest` is dev-only.
 3. **Python 3.10+ compatibility** — do not use syntax or stdlib features introduced after 3.10 without updating the CI matrix.
-4. **Correctness-locked constants** — `ARC_SEG_MM`, `ARC_MAX_DEG`, `EPS` control geometric accuracy. Changes require careful analysis of downstream effects on arc linearization and bounds calculations.
+4. **Correctness-locked constants** — `ARC_SEG_MM`, `ARC_MAX_DEG`, `EPS` in `gcode_lib` control geometric accuracy. Changes require careful analysis of downstream effects on arc linearization and bounds calculations.
 5. **Relative XY is unsupported** — the transform requires absolute coordinates; do not attempt to add relative-XY support without rethinking the entire state-tracking model.
 6. **Z is never modified** — the transform is XY-only by design.
-7. **Binary G-code block ordering** — per the libbgcode spec, GCode blocks must appear last in the file (after all metadata blocks). `_bgcode_reassemble` enforces this. Do not reorder non-GCode blocks relative to each other.
+7. **Binary G-code block ordering** — per the libbgcode spec, GCode blocks must appear last in the file (after all metadata blocks). `gcode_lib._bgcode_reassemble` enforces this.
 
 ---
 
