@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-__version__ = "1.3.0"
+__version__ = "1.5.0"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -69,9 +69,13 @@ _AXIS_RE = re.compile(rf"([XYZEFRIJK])\s*({_NUM_RE})", re.IGNORECASE)
 _BGCODE_MAGIC = b"GCDE"
 _BLK_GCODE      = 1
 _BLK_THUMBNAIL  = 5
-_COMP_NONE      = 0
-_COMP_DEFLATE   = 1
-_ENC_RAW        = 0
+_COMP_NONE              = 0
+_COMP_DEFLATE           = 1
+_COMP_HEATSHRINK_11_4   = 2   # window=2048 B, lookahead=16 B
+_COMP_HEATSHRINK_12_4   = 3   # window=4096 B, lookahead=16 B
+_ENC_RAW                = 0
+_ENC_MEATPACK           = 1
+_ENC_MEATPACK_COMMENTS  = 2
 
 # Thumbnail image format codes (matching libbgcode EImageFormat)
 _IMG_PNG = 0
@@ -733,6 +737,215 @@ def _is_bgcode_file(path: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Heatshrink decompression (pure-Python LZSS decoder)
+# ---------------------------------------------------------------------------
+
+def _heatshrink_decompress(
+    data: bytes, window_sz2: int, lookahead_sz2: int, expected_size: int,
+) -> bytes:
+    """Decompress *data* using the Heatshrink LZSS algorithm.
+
+    Parameters match the libbgcode convention:
+
+    * ``window_sz2``   — log₂ of the sliding-window size (11 or 12).
+    * ``lookahead_sz2`` — log₂ of the lookahead size (typically 4).
+    * ``expected_size`` — exact number of uncompressed bytes to produce.
+
+    The decoder reads bits MSB-first.  A tag bit of **1** introduces an
+    8-bit literal; **0** introduces a back-reference of *window_sz2* index
+    bits followed by *lookahead_sz2* count bits.
+    """
+    if expected_size == 0:
+        return b""
+
+    window_size = 1 << window_sz2
+    mask = window_size - 1
+    window = bytearray(window_size)
+    head = 0
+
+    output = bytearray(expected_size)
+    out_pos = 0
+
+    # ── bit reader state ──
+    input_len = len(data)
+    byte_pos = 0
+    bit_buf = 0       # current byte being consumed
+    bits_left = 0     # bits remaining in bit_buf (0–8)
+
+    def _get_bits(count: int) -> int:
+        """Read *count* bits MSB-first and return as an integer."""
+        nonlocal byte_pos, bit_buf, bits_left
+        result = 0
+        remaining = count
+        while remaining > 0:
+            if bits_left == 0:
+                bit_buf = data[byte_pos] if byte_pos < input_len else 0
+                byte_pos += 1
+                bits_left = 8
+            take = min(remaining, bits_left)
+            # Extract the top *take* bits from bit_buf.
+            result = (result << take) | (bit_buf >> (bits_left - take))
+            bit_buf &= (1 << (bits_left - take)) - 1
+            bits_left -= take
+            remaining -= take
+        return result
+
+    while out_pos < expected_size:
+        tag = _get_bits(1)
+        if tag:
+            # Literal byte
+            byte_val = _get_bits(8)
+            output[out_pos] = byte_val
+            window[head & mask] = byte_val
+            head += 1
+            out_pos += 1
+        else:
+            # Back-reference
+            index = _get_bits(window_sz2)
+            count = _get_bits(lookahead_sz2) + 1
+            neg_offset = index + 1
+            for _ in range(count):
+                if out_pos >= expected_size:
+                    break
+                c = window[(head - neg_offset) & mask]
+                output[out_pos] = c
+                window[head & mask] = c
+                head += 1
+                out_pos += 1
+
+    return bytes(output)
+
+
+# ---------------------------------------------------------------------------
+# MeatPack decoding
+# ---------------------------------------------------------------------------
+
+# 4-bit nibble → character lookup (standard mode)
+_MP_CHAR_TABLE: str = "0123456789. \nGX"
+# Index 0xF (15) is the escape sentinel — not a real character.
+
+# Command bytes sent after the 0xFF 0xFF signal prefix.
+_MP_CMD_ENABLE_PACKING      = 251
+_MP_CMD_DISABLE_PACKING     = 250
+_MP_CMD_RESET_ALL           = 249
+_MP_CMD_ENABLE_NO_SPACES    = 247
+_MP_CMD_DISABLE_NO_SPACES   = 246
+
+_MP_SPACE_RE = re.compile(r"(?<=[0-9.])(?=[A-Z])")
+"""Insert whitespace before an uppercase axis/command letter that immediately
+follows a digit or period.  MeatPack *no-spaces* mode strips inter-word
+spaces; this regex restores them so that downstream ``parse_line()`` works."""
+
+
+def _meatpack_decode(data: bytes) -> str:
+    """Decode MeatPack / MeatPackComments encoded *data* to a string.
+
+    MeatPack packs two common G-code characters into a single byte using
+    4-bit nibbles.  Nibble value 0xF is an escape: the *next* full byte
+    is a raw character.  The scheme is toggled on/off by a ``0xFF 0xFF
+    <cmd>`` signal sequence embedded in the stream.
+
+    Signal detection uses a one-byte lookahead: when a ``0xFF`` is seen,
+    peek at the next byte.  If it is also ``0xFF`` the pair is a signal
+    prefix and the following byte is a command.  Otherwise the ``0xFF``
+    is normal data (a packed byte with both nibbles = escape when packing
+    is enabled, or a raw ``0xFF`` when it is not).
+    """
+    out: list[str] = []
+    table = list(_MP_CHAR_TABLE)
+    packing = False
+    # Number of pending full-char bytes to pass through raw.
+    pending_raw = 0
+    # Character held from unpacking the second nibble when the first
+    # nibble was an escape.
+    held_char: str | None = None
+
+    i = 0
+    n = len(data)
+
+    while i < n:
+        b = data[i]
+        i += 1
+
+        # ── signal detection (0xFF 0xFF <cmd>) ──
+        if b == 0xFF:
+            if i < n and data[i] == 0xFF:
+                # Confirmed signal prefix — consume the second 0xFF.
+                i += 1
+                if i < n:
+                    cmd = data[i]
+                    i += 1
+                    if cmd == _MP_CMD_ENABLE_PACKING:
+                        packing = True
+                    elif cmd == _MP_CMD_DISABLE_PACKING:
+                        packing = False
+                    elif cmd == _MP_CMD_RESET_ALL:
+                        packing = False
+                        table = list(_MP_CHAR_TABLE)
+                    elif cmd == _MP_CMD_ENABLE_NO_SPACES:
+                        table = list(_MP_CHAR_TABLE)
+                        table[11] = "E"   # space slot becomes 'E'
+                    elif cmd == _MP_CMD_DISABLE_NO_SPACES:
+                        table = list(_MP_CHAR_TABLE)
+                continue
+            # Single 0xFF (next byte is not 0xFF) — fall through and
+            # process it as normal data below.
+
+        # ── pending raw bytes (from a previous escape nibble) ──
+        if pending_raw > 0:
+            pending_raw -= 1
+            # The raw byte is always the escaped character (came first in
+            # the pair), so it must be emitted *before* any held second
+            # nibble character.
+            out.append(chr(b))
+            if pending_raw == 0 and held_char is not None:
+                out.append(held_char)
+                held_char = None
+            continue
+
+        # ── raw mode (packing disabled) ──
+        if not packing:
+            out.append(chr(b))
+            continue
+
+        # ── packing mode — unpack two nibbles ──
+        # MeatPack convention: low nibble is the FIRST character,
+        # high nibble is the SECOND character.
+        lo = b & 0x0F          # first character
+        hi = (b >> 4) & 0x0F   # second character
+
+        if lo == 0x0F and hi == 0x0F:
+            # Both nibbles are escapes → next 2 bytes are raw chars.
+            pending_raw = 2
+        elif lo == 0x0F:
+            # First char (lo) is escape → next byte is a raw char.
+            # Hold the second char (hi) until after the raw byte.
+            pending_raw = 1
+            held_char = table[hi]
+        elif hi == 0x0F:
+            # Second char (hi) is escape → output first char now,
+            # next byte is raw.
+            out.append(table[lo])
+            pending_raw = 1
+        else:
+            # Both nibbles are valid packed characters.
+            out.append(table[lo])
+            out.append(table[hi])
+
+    # Flush any held character that was never followed by a raw byte
+    # (shouldn't happen in well-formed data, but be safe).
+    if held_char is not None:
+        out.append(held_char)
+
+    text = "".join(out)
+
+    # MeatPack no-spaces mode strips whitespace between G-code words.
+    # Re-insert spaces so that "G1X10Y20" becomes "G1 X10 Y20" and
+    # parse_line() can split the command from its axes.
+    return _MP_SPACE_RE.sub(" ", text)
+
+
 def _bgcode_split(
     data: bytes,
 ) -> Tuple[bytes, List[bytes], List[Thumbnail], str]:
@@ -777,7 +990,7 @@ def _bgcode_split(
         if comp == _COMP_NONE:
             comp_size = uncomp_size
             hdr_len = 8
-        elif comp in (_COMP_DEFLATE, 2, 3):  # DEFLATE or Heatshrink variants
+        elif comp in (_COMP_DEFLATE, _COMP_HEATSHRINK_11_4, _COMP_HEATSHRINK_12_4):
             if pos + 12 > len(data):
                 raise ValueError(f"Truncated compressed block header at offset {pos}")
             comp_size, = struct.unpack_from("<I", data, pos + 8)
@@ -819,17 +1032,22 @@ def _bgcode_split(
                     raise ValueError(
                         f"DEFLATE decompression failed at offset {pos}: {exc}"
                     ) from exc
+            elif comp == _COMP_HEATSHRINK_11_4:
+                raw_payload = _heatshrink_decompress(payload, 11, 4, uncomp_size)
+            elif comp == _COMP_HEATSHRINK_12_4:
+                raw_payload = _heatshrink_decompress(payload, 12, 4, uncomp_size)
             else:
                 raise ValueError(
-                    f"Unsupported GCode block compression {comp} at offset {pos} "
-                    "(Heatshrink decoding requires a third-party library)"
+                    f"Unsupported GCode block compression {comp} at offset {pos}"
                 )
-            if enc != _ENC_RAW:
+            if enc == _ENC_RAW:
+                gcode_parts.append(raw_payload.decode("utf-8"))
+            elif enc in (_ENC_MEATPACK, _ENC_MEATPACK_COMMENTS):
+                gcode_parts.append(_meatpack_decode(raw_payload))
+            else:
                 raise ValueError(
-                    f"Unsupported GCode block encoding {enc} at offset {pos} "
-                    "(MeatPack decoding is not supported)"
+                    f"Unsupported GCode block encoding {enc} at offset {pos}"
                 )
-            gcode_parts.append(raw_payload.decode("utf-8"))
 
         elif btype == _BLK_THUMBNAIL:
             params_bytes = data[params_start:payload_start]
@@ -842,8 +1060,12 @@ def _bgcode_split(
                     raise ValueError(
                         f"DEFLATE decompression of thumbnail failed at offset {pos}: {exc}"
                     ) from exc
+            elif comp == _COMP_HEATSHRINK_11_4:
+                img_data = _heatshrink_decompress(payload, 11, 4, uncomp_size)
+            elif comp == _COMP_HEATSHRINK_12_4:
+                img_data = _heatshrink_decompress(payload, 12, 4, uncomp_size)
             else:
-                img_data = payload  # store as-is for unsupported compression
+                img_data = payload  # store as-is for unknown compression
             thumbnails.append(Thumbnail(params=params_bytes, data=img_data, _raw_block=raw_block))
             nongcode_raws.append(raw_block)
 
