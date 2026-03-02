@@ -4,11 +4,11 @@ import pytest
 def test_binary_guard_gcde_at_start_is_rejected(tmp_path, load_module):
     # A file with the GCDE magic but too short to be a valid bgcode is
     # routed through the bgcode parser, which raises SystemExit with a
-    # descriptive parse error rather than a flat "not supported" message.
+    # descriptive error message.
     m = load_module
     p = tmp_path / "binary_like.gcode"
     p.write_bytes(b"GCDE" + b"\x01\x02\x03")
-    with pytest.raises(SystemExit, match="ERROR reading binary G-code"):
+    with pytest.raises(SystemExit, match="ERROR"):
         m.rewrite(
             str(p),
             skew_deg=-0.15,

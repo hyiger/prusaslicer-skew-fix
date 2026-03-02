@@ -8,6 +8,8 @@ import zlib
 
 import pytest
 
+import gcode_lib
+
 
 # ---------------------------------------------------------------------------
 # Local helper: build a minimal valid .bgcode file from a G-code text string
@@ -61,96 +63,89 @@ def _make_meta_block(btype: int, content: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# _is_bgcode
+# _is_bgcode via gcode_lib.load auto-detection
 # ---------------------------------------------------------------------------
 
-def test_is_bgcode_true(tmp_path, load_module):
-    m = load_module
+def test_is_bgcode_true(tmp_path):
     p = tmp_path / "test.bgcode"
     p.write_bytes(_make_bgcode("G1 X10\n"))
-    assert m._is_bgcode(str(p)) is True
+    gf = gcode_lib.load(str(p))
+    assert gf.source_format == "bgcode"
 
 
-def test_is_bgcode_false_text(tmp_path, load_module):
-    m = load_module
+def test_is_bgcode_false_text(tmp_path):
     p = tmp_path / "test.gcode"
     p.write_text("G1 X10\n", encoding="utf-8")
-    assert m._is_bgcode(str(p)) is False
+    gf = gcode_lib.load(str(p))
+    assert gf.source_format == "text"
 
 
-def test_is_bgcode_false_missing_file(tmp_path, load_module):
-    m = load_module
-    assert m._is_bgcode(str(tmp_path / "nonexistent.bgcode")) is False
+def test_is_bgcode_false_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        gcode_lib.load(str(tmp_path / "nonexistent.bgcode"))
 
 
 # ---------------------------------------------------------------------------
 # _bgcode_split
 # ---------------------------------------------------------------------------
 
-def test_bgcode_split_basic(load_module):
-    m = load_module
+def test_bgcode_split_basic():
     text = "G28\nG1 X10 Y20 F3000\nG1 X20 Y30 E1.0\n"
     data = _make_bgcode(text)
-    file_hdr, other_blocks, gcode_text = m._bgcode_split(data)
+    file_hdr, other_blocks, _thumbs, gcode_text = gcode_lib._bgcode_split(data)
     assert file_hdr[:4] == b"GCDE"
     assert len(file_hdr) == 10
     assert other_blocks == []
     assert gcode_text == text
 
 
-def test_bgcode_split_bad_magic(load_module):
-    m = load_module
-    with pytest.raises(ValueError, match="Not a bgcode"):
-        m._bgcode_split(b"NOTGCODE" + b"\x00" * 20)
+def test_bgcode_split_bad_magic():
+    with pytest.raises(ValueError, match="Not a .bgcode"):
+        gcode_lib._bgcode_split(b"NOTGCODE" + b"\x00" * 20)
 
 
-def test_bgcode_split_too_short(load_module):
-    m = load_module
+def test_bgcode_split_too_short():
     with pytest.raises(ValueError, match="too short"):
-        m._bgcode_split(b"GCDE\x01")
+        gcode_lib._bgcode_split(b"GCDE\x01")
 
 
-def test_bgcode_split_crc_mismatch(load_module):
-    m = load_module
+def test_bgcode_split_crc_mismatch():
     data = bytearray(_make_bgcode("G1 X1\n"))
     # Corrupt a byte in the GCode payload (after 10-byte file header + 8-byte block header + 2-byte params)
     data[20] ^= 0xFF
     with pytest.raises(ValueError, match="CRC32 mismatch"):
-        m._bgcode_split(bytes(data))
+        gcode_lib._bgcode_split(bytes(data))
 
 
-def test_bgcode_split_no_gcode_block(load_module):
+def test_bgcode_split_no_gcode_block():
     """A file with only metadata blocks (no GCode block) should raise."""
-    m = load_module
     MAGIC = b"GCDE"
     file_hdr = MAGIC + struct.pack("<IH", 1, 1)
     meta = _make_meta_block(2, b"key=val\n")   # BLK_SLICER_META = 2
     with pytest.raises(ValueError, match="No GCode blocks"):
-        m._bgcode_split(file_hdr + meta)
+        gcode_lib._bgcode_split(file_hdr + meta)
 
 
-def test_bgcode_split_preserves_other_blocks(load_module):
+def test_bgcode_split_preserves_other_blocks():
     """Non-GCode blocks are returned verbatim in other_blocks."""
-    m = load_module
     BLK_SLICER_META = 2
     meta = _make_meta_block(BLK_SLICER_META, b"generator=test\n")
     gcode = "G1 X5 Y5\n"
     data = _make_bgcode(gcode, extra_blocks=[meta])
-    file_hdr, other_blocks, gcode_text = m._bgcode_split(data)
+    file_hdr, other_blocks, _thumbs, gcode_text = gcode_lib._bgcode_split(data)
     assert len(other_blocks) == 1
     assert other_blocks[0] == meta
     assert gcode_text == gcode
 
 
-def test_bgcode_split_multiple_other_blocks(load_module):
+def test_bgcode_split_multiple_other_blocks():
     """Multiple non-GCode blocks all appear in other_blocks in order."""
-    m = load_module
     BLK_PRINTER_META = 3
     BLK_SLICER_META = 2
     b1 = _make_meta_block(BLK_PRINTER_META, b"model=CoreOne\n")
     b2 = _make_meta_block(BLK_SLICER_META, b"version=2.9\n")
     data = _make_bgcode("G1 X1\n", extra_blocks=[b1, b2])
-    _, other_blocks, _ = m._bgcode_split(data)
+    _, other_blocks, _thumbs, _ = gcode_lib._bgcode_split(data)
     assert len(other_blocks) == 2
     assert other_blocks[0] == b1
     assert other_blocks[1] == b2
@@ -160,35 +155,32 @@ def test_bgcode_split_multiple_other_blocks(load_module):
 # _bgcode_reassemble
 # ---------------------------------------------------------------------------
 
-def test_bgcode_reassemble_roundtrip(load_module):
+def test_bgcode_reassemble_roundtrip():
     """Reassemble a split file and re-split — should recover identical text."""
-    m = load_module
     text = "G90\nM82\nG1 X10 Y20 E1.0\n"
     data = _make_bgcode(text)
-    file_hdr, other_blocks, _ = m._bgcode_split(data)
+    file_hdr, other_blocks, _thumbs, _ = gcode_lib._bgcode_split(data)
     new_text = "G90\nM82\nG1 X11 Y20 E1.0\n"
-    rebuilt = m._bgcode_reassemble(file_hdr, other_blocks, new_text)
-    _, _, recovered = m._bgcode_split(rebuilt)
+    rebuilt = gcode_lib._bgcode_reassemble(file_hdr, other_blocks, new_text)
+    _, _, _thumbs2, recovered = gcode_lib._bgcode_split(rebuilt)
     assert recovered == new_text
 
 
-def test_bgcode_reassemble_starts_with_gcde(load_module):
-    m = load_module
+def test_bgcode_reassemble_starts_with_gcde():
     data = _make_bgcode("G1 X1\n")
-    file_hdr, other_blocks, _ = m._bgcode_split(data)
-    rebuilt = m._bgcode_reassemble(file_hdr, other_blocks, "G1 X2\n")
+    file_hdr, other_blocks, _thumbs, _ = gcode_lib._bgcode_split(data)
+    rebuilt = gcode_lib._bgcode_reassemble(file_hdr, other_blocks, "G1 X2\n")
     assert rebuilt[:4] == b"GCDE"
 
 
-def test_bgcode_reassemble_preserves_meta_blocks(load_module):
-    """After reassemble→split the non-GCode blocks are bit-for-bit identical."""
-    m = load_module
+def test_bgcode_reassemble_preserves_meta_blocks():
+    """After reassemble->split the non-GCode blocks are bit-for-bit identical."""
     BLK_PRINT_META = 4
     meta = _make_meta_block(BLK_PRINT_META, b"layer_height=0.2\n")
     data = _make_bgcode("G1 X5\n", extra_blocks=[meta])
-    file_hdr, other_blocks, _ = m._bgcode_split(data)
-    rebuilt = m._bgcode_reassemble(file_hdr, other_blocks, "G1 X6\n")
-    _, other_back, _ = m._bgcode_split(rebuilt)
+    file_hdr, other_blocks, _thumbs, _ = gcode_lib._bgcode_split(data)
+    rebuilt = gcode_lib._bgcode_reassemble(file_hdr, other_blocks, "G1 X6\n")
+    _, other_back, _thumbs2, _ = gcode_lib._bgcode_split(rebuilt)
     assert len(other_back) == 1
     assert other_back[0] == meta
 
@@ -220,7 +212,7 @@ def test_rewrite_bgcode_is_bgcode_output(tmp_path, load_module):
     raw = p.read_bytes()
     assert raw[:4] == b"GCDE"
     # Must be parseable
-    _, _, result = m._bgcode_split(raw)
+    _, _, _thumbs, result = gcode_lib._bgcode_split(raw)
     assert "G1" in result
 
 
@@ -245,7 +237,7 @@ def test_rewrite_bgcode_x_is_modified(tmp_path, load_module):
         analyze_only=False,
     )
 
-    _, _, result = m._bgcode_split(p.read_bytes())
+    _, _, _thumbs, result = gcode_lib._bgcode_split(p.read_bytes())
     # x' = 10 + (10 - 0) * tan(1°) = 10.175 (to 3 d.p.)
     k = math.tan(math.radians(skew_deg))
     expected_x = round(10 + 10 * k, 3)
@@ -273,7 +265,7 @@ def test_rewrite_bgcode_y_unchanged(tmp_path, load_module):
         analyze_only=False,
     )
 
-    _, _, result = m._bgcode_split(p.read_bytes())
+    _, _, _thumbs, result = gcode_lib._bgcode_split(p.read_bytes())
     assert "Y15" in result
 
 
@@ -303,7 +295,7 @@ def test_rewrite_bgcode_preserves_non_gcode_blocks(tmp_path, load_module):
         analyze_only=False,
     )
 
-    _, other_blocks, _ = m._bgcode_split(p.read_bytes())
+    _, other_blocks, _thumbs, _ = gcode_lib._bgcode_split(p.read_bytes())
     assert len(other_blocks) == 2
     assert other_blocks[0] == b_printer
     assert other_blocks[1] == b_slicer
@@ -333,7 +325,7 @@ def test_rewrite_bgcode_zero_skew_gcode_equivalent(tmp_path, load_module):
     m.rewrite(str(p_bg), **kwargs)
     m.rewrite(str(p_txt), **kwargs)
 
-    _, _, bg_result = m._bgcode_split(p_bg.read_bytes())
+    _, _, _thumbs, bg_result = gcode_lib._bgcode_split(p_bg.read_bytes())
     txt_result = p_txt.read_text(encoding="utf-8")
     # Both should contain the same skewed (identity) move line
     assert "X10" in bg_result
@@ -388,7 +380,7 @@ def test_rewrite_bgcode_with_recenter(tmp_path, load_module):
 
     raw = p.read_bytes()
     assert raw[:4] == b"GCDE"
-    _, _, result = m._bgcode_split(raw)
+    _, _, _thumbs, result = gcode_lib._bgcode_split(raw)
     assert "prusaslicer-skew-fix" in result
 
 
@@ -412,6 +404,6 @@ def test_rewrite_bgcode_metadata_comment_present(tmp_path, load_module):
         analyze_only=False,
     )
 
-    _, _, result = m._bgcode_split(p.read_bytes())
+    _, _, _thumbs, result = gcode_lib._bgcode_split(p.read_bytes())
     assert "prusaslicer-skew-fix: applied XY skew correction" in result
     assert "skew_deg=0.3" in result

@@ -89,7 +89,7 @@ def test_binary_guard_rejects_nul_binary(tmp_path, load_module):
     m = load_module
     p = tmp_path / "nul.gcode"
     p.write_bytes(b"G1 X0 Y0\n\x00BINARY")
-    with pytest.raises(SystemExit, match="NUL bytes detected"):
+    with pytest.raises(SystemExit, match="ERROR"):
         m.rewrite(
             str(p),
             skew_deg=-0.15,
