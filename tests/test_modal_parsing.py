@@ -1,28 +1,29 @@
-def test_modal_parser_matches_exact_opcode_only(load_module):
-    m = load_module
-    st = m.State(abs_xy=True, abs_e=False, ij_relative=True)
+import gcode_lib
+
+
+def test_modal_parser_matches_exact_opcode_only():
+    st = gcode_lib.ModalState(abs_xy=True, abs_e=False, ij_relative=True)
 
     # Similar prefixes should not be interpreted as modal toggles.
-    assert m._handle_modal_state_line(st, "M820") is False
+    gcode_lib.advance_state(st, gcode_lib.parse_line("M820"))
     assert st.abs_e is False
 
-    assert m._handle_modal_state_line(st, "G901") is False
+    gcode_lib.advance_state(st, gcode_lib.parse_line("G901"))
     assert st.abs_xy is True
 
-    assert m._handle_modal_state_line(st, "G911") is False
+    gcode_lib.advance_state(st, gcode_lib.parse_line("G911"))
     assert st.abs_xy is True
 
     # Exact modal opcodes still work.
-    assert m._handle_modal_state_line(st, "M82") is True
+    gcode_lib.advance_state(st, gcode_lib.parse_line("M82"))
     assert st.abs_e is True
-    assert m._handle_modal_state_line(st, "G91") is True
+    gcode_lib.advance_state(st, gcode_lib.parse_line("G91"))
     assert st.abs_xy is False
 
 
-def test_modal_parser_handles_whitespace_and_comment(load_module):
-    m = load_module
-    st = m.State(abs_xy=False, abs_e=False, ij_relative=True)
-    assert m._handle_modal_state_line(st, "G90   ; COMMENT")
+def test_modal_parser_handles_whitespace_and_comment():
+    st = gcode_lib.ModalState(abs_xy=False, abs_e=False, ij_relative=True)
+    gcode_lib.advance_state(st, gcode_lib.parse_line("G90   ; COMMENT"))
     assert st.abs_xy is True
-    assert m._handle_modal_state_line(st, "M82 ; COMMENT")
+    gcode_lib.advance_state(st, gcode_lib.parse_line("M82 ; COMMENT"))
     assert st.abs_e is True
