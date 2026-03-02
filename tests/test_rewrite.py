@@ -147,6 +147,80 @@ def test_rewrite_auto_bed_fallback_no_m862(tmp_path, load_module):
     assert "G1" in txt
 
 
+def test_rewrite_auto_bed_unknown_printer_falls_back(tmp_path, load_module):
+    """Unknown printer in M862.3 P falls back to 250x220 defaults."""
+    m = load_module
+    g = tmp_path / "t.gcode"
+    g.write_text("\n".join([
+        'M862.3 P "UNKNOWN_PRINTER"',
+        "G90",
+        "M82",
+        "G1 X100 Y100 E1.0",
+        "",
+    ]), encoding="utf-8")
+
+    m.rewrite(
+        str(g),
+        skew_deg=-0.15,
+        recenter=False,
+        bed_x_min=None, bed_x_max=None, bed_y_min=None, bed_y_max=None,
+        margin=0.0,
+        recenter_mode="center",
+        shear_y_ref_mode="auto", shear_y_ref=0.0,
+        analyze_only=False,
+    )
+    txt = g.read_text(encoding="utf-8")
+    assert "G1" in txt
+
+
+def test_rewrite_partial_bed_bounds_override(tmp_path, load_module):
+    """Explicit bed_y_max with None for others uses auto-detect + override."""
+    m = load_module
+    g = tmp_path / "t.gcode"
+    g.write_text("\n".join([
+        'M862.3 P "COREONE"',
+        "G90",
+        "M82",
+        "G1 X100 Y100 E1.0",
+        "",
+    ]), encoding="utf-8")
+
+    # Only override bed_y_max; others should auto-detect from COREONE
+    m.rewrite(
+        str(g),
+        skew_deg=-0.15,
+        recenter=False,
+        bed_x_min=None, bed_x_max=None, bed_y_min=None, bed_y_max=200.0,
+        margin=0.0,
+        recenter_mode="center",
+        shear_y_ref_mode="auto", shear_y_ref=0.0,
+        analyze_only=False,
+    )
+    txt = g.read_text(encoding="utf-8")
+    assert "G1" in txt
+
+
+def test_rewrite_auto_bed_with_analyze_only(tmp_path, load_module):
+    """analyze_only with auto-detected bed bounds produces output."""
+    m = load_module
+    g = tmp_path / "t.gcode"
+    original = 'M862.3 P "MK4"\nG90\nM82\nG1 X100 Y100 E1.0\n'
+    g.write_text(original, encoding="utf-8")
+
+    m.rewrite(
+        str(g),
+        skew_deg=-0.15,
+        recenter=True,
+        bed_x_min=None, bed_x_max=None, bed_y_min=None, bed_y_max=None,
+        margin=0.0,
+        recenter_mode="clamp",
+        shear_y_ref_mode="auto", shear_y_ref=0.0,
+        analyze_only=True,
+    )
+    # File should not be modified in analyze-only mode
+    assert g.read_text(encoding="utf-8") == original
+
+
 def test_binary_guard_rejects_gcde_within_header_window(tmp_path, load_module):
     m = load_module
     p = tmp_path / "bad_header.gcode"
