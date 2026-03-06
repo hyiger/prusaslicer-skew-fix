@@ -28,12 +28,12 @@ skew_fix_ps.py [options] gcode
 ```
 
 - `gcode` (positional): path to `.gcode` or `.bgcode` file
-- Skew source (choose exactly one):
-- `--skew-deg SKEW_DEG`
-- `--skew-from-square AC,BD,AD`
-- `--skew-from-rectangle AC,BD,AD,AB`
+- Skew source (required, choose exactly one):
+  - `--skew-deg SKEW_DEG`
+  - `--skew-from-square AC,BD,AD`
+  - `--skew-from-rectangle AC,BD,AD,AB`
 - `--shear-y-ref-mode {auto,fixed}` (default: `auto`)
-- `--shear-y-ref SHEAR_Y_REF` (used when mode is `fixed`)
+- `--shear-y-ref SHEAR_Y_REF` (used when mode is `fixed`, default: `0.0`)
 - `--xy-decimals XY_DECIMALS` (default: `3`)
 - `--other-decimals OTHER_DECIMALS` (default: `5`)
 - `--analyze-only`
@@ -125,8 +125,9 @@ Reports include pre/post bounds, max `|ΔX|`, and recenter shift (when enabled).
 ## Safety and File Handling
 
 - Both plain-text `.gcode` and Prusa binary `.bgcode` files are supported.
-- `.bgcode` compression: `COMP_NONE`, `COMP_DEFLATE`, and `Heatshrink` (11/4 and 12/4) are supported. MeatPack encoding is not supported.
-- `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact — suitable for direct upload to PrusaConnect.
+- `.bgcode` compression: `COMP_NONE`, `COMP_DEFLATE`, and `Heatshrink` (11/4 and 12/4) are supported.
+- `.bgcode` encoding: `ENC_RAW` and MeatPack variants are accepted on input. Rewritten output is emitted as `ENC_RAW`.
+- `.bgcode` files are decoded, corrected, and re-encoded with all non-GCode blocks (thumbnails, metadata) preserved intact, suitable for direct upload to PrusaConnect.
 - Unrecognised binary files (NUL bytes, non-`GCDE` magic) are rejected with an error.
 - Rewrite is done via temp file and atomic replace.
 
